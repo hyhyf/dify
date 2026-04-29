@@ -51,7 +51,10 @@ class SandboxProviderService:
             }
 
             providers: list[SandboxProviderApiEntity] = []
-            current_provider = cls.get_active_sandbox_config(session, tenant_id)
+            try:
+                current_provider = cls.get_active_sandbox_config(session, tenant_id)
+            except ValueError:
+                current_provider = None
             for provider_type in SandboxType.get_all():
                 tenant_config = tenant_configs.get(provider_type)
                 schema = VMConfig.get_schema(SandboxType(provider_type))
@@ -67,7 +70,7 @@ class SandboxProviderService:
                             provider_type=provider_type,
                             is_system_configured=system_configs.get(provider_type) is not None,
                             is_tenant_configured=is_tenant_configured,
-                            is_active=current_provider.id == tenant_config.id,
+                            is_active=current_provider is not None and current_provider.id == tenant_config.id,
                             config=config,
                             config_schema=[c.model_dump() for c in schema],
                         )
@@ -77,7 +80,7 @@ class SandboxProviderService:
                     providers.append(
                         SandboxProviderApiEntity(
                             provider_type=provider_type,
-                            is_active=system_config is not None and system_config.id == current_provider.id,
+                            is_active=current_provider is not None and system_config is not None and system_config.id == current_provider.id,
                             is_system_configured=system_config is not None,
                             config_schema=[c.model_dump() for c in schema],
                         )

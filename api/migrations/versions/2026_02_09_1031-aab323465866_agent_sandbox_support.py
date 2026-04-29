@@ -42,6 +42,9 @@ def _get_ssh_config_from_env() -> dict[str, str]:
 def upgrade():
     from core.tools.utils.system_encryption import encrypt_system_params
 
+    conn = op.get_bind()
+    dialect_name = conn.engine.dialect.name
+
     op.create_table(
         "sandbox_provider_system_config",
         sa.Column("id", models.types.StringUUID(), nullable=False),
@@ -115,20 +118,37 @@ def upgrade():
         ssh_config = _get_ssh_config_from_env()
         encrypted_config = encrypt_system_params(ssh_config)
 
-        op.execute(
-            sa.text(
-                """
-                INSERT INTO sandbox_provider_system_config
-                (id, provider_type, encrypted_config, created_at, updated_at)
-                VALUES (:id, :provider_type, :encrypted_config, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
-                ON CONFLICT (provider_type) DO NOTHING
-                """
-            ).bindparams(
-                id=str(uuid4()),
-                provider_type="ssh",
-                encrypted_config=encrypted_config,
+        if dialect_name == "mysql":
+            # MySQL uses INSERT IGNORE for upsert-like behavior
+            op.execute(
+                sa.text(
+                    """
+                    INSERT IGNORE INTO sandbox_provider_system_config
+                    (id, provider_type, encrypted_config, created_at, updated_at)
+                    VALUES (:id, :provider_type, :encrypted_config, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    """
+                ).bindparams(
+                    id=str(uuid4()),
+                    provider_type="ssh",
+                    encrypted_config=encrypted_config,
+                )
             )
-        )
+        else:
+            # PostgreSQL uses ON CONFLICT
+            op.execute(
+                sa.text(
+                    """
+                    INSERT INTO sandbox_provider_system_config
+                    (id, provider_type, encrypted_config, created_at, updated_at)
+                    VALUES (:id, :provider_type, :encrypted_config, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ON CONFLICT (provider_type) DO NOTHING
+                    """
+                ).bindparams(
+                    id=str(uuid4()),
+                    provider_type="ssh",
+                    encrypted_config=encrypted_config,
+                )
+            )
 
 
 def downgrade():

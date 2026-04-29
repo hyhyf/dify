@@ -110,10 +110,15 @@ class SandboxBashTool(Tool):
                 cmd_list = ["bash", "-c", full_command]
                 sandbox_debug("bash_tool", "cmd_list", cmd_list)
 
+                tool_env = {
+                    "PATH": f"{self._tools_path}:/usr/local/bin:/usr/bin:/bin",
+                    "DIFY_CLI_CONFIG": f"{self._tools_path}/{DifyCli.CONFIG_FILENAME}",
+                }
                 future = submit_command(
                     self._sandbox,
                     conn,
                     cmd_list,
+                    environments=tool_env,
                 )
                 timeout = COMMAND_TIMEOUT_SECONDS if COMMAND_TIMEOUT_SECONDS > 0 else None
                 result = future.result(timeout=timeout)

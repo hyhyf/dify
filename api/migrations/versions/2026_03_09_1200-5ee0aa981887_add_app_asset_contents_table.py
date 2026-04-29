@@ -25,7 +25,7 @@ def upgrade() -> None:
         sa.Column("tenant_id", models.types.StringUUID(), nullable=False),
         sa.Column("app_id", models.types.StringUUID(), nullable=False),
         sa.Column("node_id", models.types.StringUUID(), nullable=False),
-        sa.Column("content", sa.Text(), nullable=False, server_default=""),
+        sa.Column("content", sa.Text(), nullable=False),
         sa.Column("size", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()),
         sa.Column("updated_at", sa.DateTime(), nullable=False, server_default=sa.func.current_timestamp()),

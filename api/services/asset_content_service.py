@@ -11,9 +11,11 @@ Collaborators:
 import logging
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.mysql import insert as mysql_insert
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.orm import Session
 
+from configs import dify_config
 from extensions.ext_database import db
 from models.app_asset import AppAssetContent
 
@@ -57,20 +59,33 @@ class AssetContentService:
     def upsert(tenant_id: str, app_id: str, node_id: str, content: str, size: int) -> None:
         """Insert or update inline content for a single node."""
         with Session(db.engine) as session:
-            stmt = pg_insert(AppAssetContent).values(
-                tenant_id=tenant_id,
-                app_id=app_id,
-                node_id=node_id,
-                content=content,
-                size=size,
-            )
-            stmt = stmt.on_conflict_do_update(
-                constraint="uq_asset_content_node",
-                set_={
-                    "content": stmt.excluded.content,
-                    "size": stmt.excluded.size,
-                },
-            )
+            if dify_config.SQLALCHEMY_DATABASE_URI_SCHEME == "postgresql":
+                stmt = pg_insert(AppAssetContent).values(
+                    tenant_id=tenant_id,
+                    app_id=app_id,
+                    node_id=node_id,
+                    content=content,
+                    size=size,
+                )
+                stmt = stmt.on_conflict_do_update(
+                    constraint="uq_asset_content_node",
+                    set_={
+                        "content": stmt.excluded.content,
+                        "size": stmt.excluded.size,
+                    },
+                )
+            else:
+                stmt = mysql_insert(AppAssetContent).values(
+                    tenant_id=tenant_id,
+                    app_id=app_id,
+                    node_id=node_id,
+                    content=content,
+                    size=size,
+                )
+                stmt = stmt.on_duplicate_key_update(
+                    content=stmt.inserted.content,
+                    size=stmt.inserted.size,
+                )
             session.execute(stmt)
             session.commit()
 
