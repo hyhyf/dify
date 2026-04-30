@@ -98,7 +98,11 @@ class CachedContentAccessor:
             return cached.encode("utf-8")
 
         # 2. Fallback to S3
-        data = self._inner.load(node)
+        try:
+            data = self._inner.load(node)
+        except FileNotFoundError:
+            logger.warning("Asset not found in DB or S3, node_id=%s", node.id)
+            raise
 
         # 3. Sync backfill DB
         AssetContentService.upsert(
@@ -111,7 +115,11 @@ class CachedContentAccessor:
         return data
 
     def bulk_load(self, nodes: list[AppAssetNode]) -> dict[str, bytes]:
-        """Single SQL for all nodes, S3 fallback + backfill per miss."""
+        """Single SQL for all nodes, S3 fallback + backfill per miss.
+
+        Nodes missing from both DB and S3 are silently skipped, so callers
+        can handle partial availability via ``.get(node_id)`` checks.
+        """
         result: dict[str, bytes] = {}
         node_ids = [n.id for n in nodes]
         cached = AssetContentService.get_many(self._tenant_id, self._app_id, node_ids)
@@ -120,8 +128,11 @@ class CachedContentAccessor:
             if node.id in cached:
                 result[node.id] = cached[node.id].encode("utf-8")
             else:
-                # S3 fallback + sync backfill
-                data = self._inner.load(node)
+                try:
+                    data = self._inner.load(node)
+                except FileNotFoundError:
+                    logger.warning("Asset not found in DB or S3, skipping node_id=%s", node.id)
+                    continue
                 AssetContentService.upsert(
                     tenant_id=self._tenant_id,
                     app_id=self._app_id,
