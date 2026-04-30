@@ -2,16 +2,20 @@
 FROM node:22-alpine AS base
 LABEL maintainer="takatost@gmail.com"
 
-# if you located in China, you can use aliyun mirror to speed up
+# China network: use aliyun mirror for Alpine packages (disabled due to proxy routing issues)
 # RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
-# if you located in China, you can use taobao registry to speed up
-# RUN npm config set registry https://registry.npmmirror.com
+# China network: use npmmirror for npm
+RUN npm config set registry https://registry.npmmirror.com
 
 RUN apk add --no-cache tzdata
-RUN corepack enable
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+
+# China network: set corepack registry to npmmirror
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+
+RUN corepack enable
 ARG NEXT_PUBLIC_BASE_PATH=""
 ENV NEXT_PUBLIC_BASE_PATH="$NEXT_PUBLIC_BASE_PATH"
 ARG ENABLE_SOURCE_MAP=""
@@ -30,6 +34,9 @@ COPY package.json pnpm-lock.yaml /app/web/
 # Use packageManager from package.json
 RUN corepack install
 
+# China network: use npmmirror for pnpm
+RUN pnpm config set registry https://registry.npmmirror.com
+
 RUN pnpm install --frozen-lockfile
 
 # build resources
@@ -38,7 +45,9 @@ WORKDIR /app/web
 COPY --from=packages /app/web/ .
 COPY . .
 
-ENV NODE_OPTIONS="--max-old-space-size=4096"
+ENV NODE_OPTIONS="--max-old-space-size=8192"
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV NEXT_NO_TURBOPACK=1
 RUN pnpm build
 
 

@@ -1,6 +1,4 @@
-import psycogreen.gevent as pscycogreen_gevent  # type: ignore
 from gevent import events as gevent_events
-from grpc.experimental import gevent as grpc_gevent  # type: ignore
 
 # WARNING: This module is loaded very early in the Gunicorn worker lifecycle,
 # before gevent's monkey-patching is applied. Importing modules at the top level here can
@@ -35,6 +33,13 @@ def post_patch(event):
     # the subscriber for gevent.events.GeventDidPatchBuiltinModulesEvent.
     if not isinstance(event, gevent_events.GeventDidPatchBuiltinModulesEvent):
         return
+    # Defer imports to after gevent monkey-patching to avoid worker boot failures.
+    # Top-level imports of psycogreen.gevent and grpc.experimental.gevent cause
+    # gunicorn to fail during worker initialization because these modules are loaded
+    # before gevent patches the stdlib.
+    import psycogreen.gevent as pscycogreen_gevent  # type: ignore
+    from grpc.experimental import gevent as grpc_gevent  # type: ignore
+
     # grpc gevent
     grpc_gevent.init_gevent()
     print("gRPC patched with gevent.", flush=True)  # noqa: T201
