@@ -91,6 +91,11 @@ class CachedContentAccessor:
         self._tenant_id = tenant_id
         self._app_id = app_id
 
+    # Maximum size for DB content caching (default: 1MB).
+    # Files larger than this are served directly from object storage
+    # without backfilling to the relational DB.
+    MAX_DB_CACHE_SIZE = 1024 * 1024
+
     def load(self, node: AppAssetNode) -> bytes:
         # 1. Try DB
         cached = AssetContentService.get(self._tenant_id, self._app_id, node.id)
@@ -104,14 +109,15 @@ class CachedContentAccessor:
             logger.warning("Asset not found in DB or S3, node_id=%s", node.id)
             raise
 
-        # 3. Sync backfill DB
-        AssetContentService.upsert(
-            tenant_id=self._tenant_id,
-            app_id=self._app_id,
-            node_id=node.id,
-            content=data.decode("utf-8"),
-            size=len(data),
-        )
+        # 3. Sync backfill DB (only for content within cacheable size range)
+        if len(data) <= CachedContentAccessor.MAX_DB_CACHE_SIZE:
+            AssetContentService.upsert(
+                tenant_id=self._tenant_id,
+                app_id=self._app_id,
+                node_id=node.id,
+                content=data.decode("utf-8"),
+                size=len(data),
+            )
         return data
 
     def bulk_load(self, nodes: list[AppAssetNode]) -> dict[str, bytes]:
@@ -133,25 +139,26 @@ class CachedContentAccessor:
                 except FileNotFoundError:
                     logger.warning("Asset not found in DB or S3, skipping node_id=%s", node.id)
                     continue
-                AssetContentService.upsert(
-                    tenant_id=self._tenant_id,
-                    app_id=self._app_id,
-                    node_id=node.id,
-                    content=data.decode("utf-8"),
-                    size=len(data),
-                )
+                if len(data) <= CachedContentAccessor.MAX_DB_CACHE_SIZE:
+                    AssetContentService.upsert(
+                        tenant_id=self._tenant_id,
+                        app_id=self._app_id,
+                        node_id=node.id,
+                        content=data.decode("utf-8"),
+                        size=len(data),
+                    )
                 result[node.id] = data
         return result
 
     def save(self, node: AppAssetNode, content: bytes) -> None:
-        # Dual-write: DB + S3
-        AssetContentService.upsert(
-            tenant_id=self._tenant_id,
-            app_id=self._app_id,
-            node_id=node.id,
-            content=content.decode("utf-8"),
-            size=len(content),
-        )
+        if len(content) <= CachedContentAccessor.MAX_DB_CACHE_SIZE:
+            AssetContentService.upsert(
+                tenant_id=self._tenant_id,
+                app_id=self._app_id,
+                node_id=node.id,
+                content=content.decode("utf-8"),
+                size=len(content),
+            )
         self._inner.save(node, content)
 
     def resolve_items(self, items: list[AssetItem]) -> list[AssetItem]:

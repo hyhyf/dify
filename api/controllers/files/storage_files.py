@@ -1,27 +1,31 @@
 """Token-based file proxy controller for storage operations.
-
+ 
 This controller handles file download and upload operations using opaque UUID tokens.
 The token maps to the real storage key in Redis, so the actual storage path is never
 exposed in the URL.
-
+ 
 Routes:
     GET  /files/storage-files/{token} - Download a file
     PUT  /files/storage-files/{token} - Upload a file
-
+ 
 The operation type (download/upload) is determined by the ticket stored in Redis,
 not by the HTTP method. This ensures a download ticket cannot be used for upload
 and vice versa.
 """
-
+ 
+import logging
+import time
 from urllib.parse import quote
-
+ 
 from flask import Response, request
 from flask_restx import Resource
 from werkzeug.exceptions import Forbidden, NotFound, RequestEntityTooLarge
-
+ 
 from controllers.files import files_ns
 from extensions.ext_storage import storage
 from services.storage_ticket_service import StorageTicketService
+
+logger = logging.getLogger(__name__)
 
 
 @files_ns.route("/storage-files/<string:token>")
@@ -63,7 +67,10 @@ class StorageFilesApi(Resource):
         The ticket must have op="upload", otherwise returns 403.
         If the request body exceeds max_bytes, returns 413.
         """
+        t0 = time.time()
         ticket = StorageTicketService.get_ticket(token)
+        t1 = time.time()
+        logger.debug("storage_files PUT: get_ticket=%.3fs", t1 - t0)
         if ticket is None:
             raise Forbidden("Invalid or expired token")
 
@@ -71,10 +78,14 @@ class StorageFilesApi(Resource):
             raise Forbidden("This token is not valid for upload")
 
         content = request.get_data()
+        t2 = time.time()
+        logger.debug("storage_files PUT: get_data=%.3fs (%d bytes)", t2 - t1, len(content))
 
         if ticket.max_bytes is not None and len(content) > ticket.max_bytes:
             raise RequestEntityTooLarge(f"Upload exceeds maximum size of {ticket.max_bytes} bytes")
 
         storage.save(ticket.storage_key, content)
+        t3 = time.time()
+        logger.debug("storage_files PUT: storage_save=%.3fs", t3 - t2)
 
         return Response(status=204)

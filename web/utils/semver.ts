@@ -1,6 +1,8 @@
 import { compare, greaterOrEqual, lessThan, parse } from 'std-semver'
 
-const parseVersion = (version: string) => parse(version)
+const sanitizeVersion = (version: string) => version.replace(/(\d)(rc|alpha|beta|pre)(\d*)/i, '$1-$2$3')
+
+const parseVersion = (version: string) => parse(sanitizeVersion(version))
 
 export const getLatestVersion = (versionList: string[]) => {
   return [...versionList].sort((versionA, versionB) => {

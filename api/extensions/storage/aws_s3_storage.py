@@ -1,6 +1,5 @@
 import logging
 from collections.abc import Generator
-from urllib.parse import quote
 
 import boto3
 from botocore.client import BaseClient, Config
@@ -10,6 +9,12 @@ from configs import dify_config
 from extensions.storage.base_storage import BaseStorage
 
 logger = logging.getLogger(__name__)
+
+# Boto3's default retry mode (legacy) performs up to 5 retries with exponential
+# backoff, which can cause 30+ second delays when MinIO returns responses that
+# trigger urllib3 HeaderParsingError on reused connections. Disabling retries
+# prevents the delay; transient failures are handled by the storage callers.
+S3_DISABLE_RETRIES: dict = {"max_attempts": 1}
 
 
 class AwsS3Storage(BaseStorage):
@@ -32,6 +37,7 @@ class AwsS3Storage(BaseStorage):
         s3_client_config = Config(
             signature_version="s3v4",
             s3={"addressing_style": dify_config.S3_ADDRESS_STYLE},
+            retries=S3_DISABLE_RETRIES,
         )
         if dify_config.S3_USE_AWS_MANAGED_IAM:
             logger.info("Using AWS managed IAM role for S3")
@@ -54,19 +60,7 @@ class AwsS3Storage(BaseStorage):
                 region_name=dify_config.S3_REGION,
                 config=s3_client_config,
             )
-        # create bucket
-        try:
-            self.client.head_bucket(Bucket=self.bucket_name)
-        except ClientError as e:
-            # if bucket not exists, create it
-            if e.response.get("Error", {}).get("Code") == "404":
-                self.client.create_bucket(Bucket=self.bucket_name)
-            # if bucket is not accessible, pass, maybe the bucket is existing but not accessible
-            elif e.response.get("Error", {}).get("Code") == "403":
-                pass
-            else:
-                # other error, raise exception
-                raise
+        logger.info("S3 client initialized, bucket: %s", self.bucket_name)
 
     def save(self, filename, data):
         self.client.put_object(Bucket=self.bucket_name, Key=filename, Body=data)
@@ -113,25 +107,7 @@ class AwsS3Storage(BaseStorage):
         *,
         download_filename: str | None = None,
     ) -> str:
-        """Generate a presigned download URL.
-
-        Args:
-            filename: The S3 object key
-            expires_in: URL validity duration in seconds
-            download_filename: If provided, sets Content-Disposition header so browser
-                downloads the file with this name instead of the S3 key.
-        """
-        params: dict = {"Bucket": self.bucket_name, "Key": filename}
-        # RFC 5987 / RFC 6266: Use both filename and filename* for compatibility.
-        # filename* with UTF-8 encoding handles non-ASCII characters.
-        encoded = quote(download_filename or filename)
-        params["ResponseContentDisposition"] = f"attachment; filename=\"{encoded}\"; filename*=UTF-8''{encoded}"
-        url: str = self.client.generate_presigned_url(
-            ClientMethod="get_object",
-            Params=params,
-            ExpiresIn=expires_in,
-        )
-        return url
+        raise NotImplementedError
 
     def get_download_urls(
         self,
@@ -140,43 +116,7 @@ class AwsS3Storage(BaseStorage):
         *,
         download_filenames: list[str] | None = None,
     ) -> list[str]:
-        """Generate presigned download URLs for multiple files.
-
-        Args:
-            filenames: List of S3 object keys
-            expires_in: URL validity duration in seconds
-            download_filenames: If provided, must match len(filenames). Sets
-                Content-Disposition for each file.
-        """
-        if download_filenames is None:
-            return [
-                self.client.generate_presigned_url(
-                    ClientMethod="get_object",
-                    Params={"Bucket": self.bucket_name, "Key": filename},
-                    ExpiresIn=expires_in,
-                )
-                for filename in filenames
-            ]
-
-        urls: list[str] = []
-        for filename, download_filename in zip(filenames, download_filenames, strict=True):
-            params: dict = {"Bucket": self.bucket_name, "Key": filename}
-            if download_filename:
-                encoded = quote(download_filename)
-                params["ResponseContentDisposition"] = f"attachment; filename=\"{encoded}\"; filename*=UTF-8''{encoded}"
-            urls.append(
-                self.client.generate_presigned_url(
-                    ClientMethod="get_object",
-                    Params=params,
-                    ExpiresIn=expires_in,
-                )
-            )
-        return urls
+        raise NotImplementedError
 
     def get_upload_url(self, filename: str, expires_in: int = 3600) -> str:
-        url: str = self.client.generate_presigned_url(
-            ClientMethod="put_object",
-            Params={"Bucket": self.bucket_name, "Key": filename},
-            ExpiresIn=expires_in,
-        )
-        return url
+        raise NotImplementedError

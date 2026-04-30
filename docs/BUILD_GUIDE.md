@@ -228,6 +228,186 @@ AGENTBOX_NGINX_PORT=80
 EXPOSE_AGENTBOX_SSH_PORT=2222
 ```
 
+### 3.2 MinIO S3 存储配置
+
+Dify 默认使用本地文件系统 (OpenDAL) 存储用户文件（上传的图片、文档、插件文件等）。
+本节将存储后端切换为 MinIO S3 对象存储。
+
+#### 3.2.1 MinIO 服务定义
+
+在 `docker/docker-compose.override.yaml` 中添加 MinIO 服务和初始化容器：
+
+```yaml
+services:
+  # MinIO S3-compatible object storage for Dify file storage
+  storage_minio:
+    image: minio/minio:RELEASE.2025-04-08T15-41-24Z
+    container_name: dify-minio
+    restart: always
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    command: server /data --console-address ":9001"
+    volumes:
+      - ./volumes/minio/data:/data
+    ports:
+      - "${EXPOSE_MINIO_API_PORT:-9000}:9000"
+      - "${EXPOSE_MINIO_CONSOLE_PORT:-9001}:9001"
+    networks:
+      - default
+
+  # Init MinIO bucket creation
+  init_minio_bucket:
+    image: minio/mc:RELEASE.2025-04-08T15-39-49Z
+    container_name: dify-minio-init
+    depends_on:
+      storage_minio:
+        condition: service_started
+    entrypoint: >
+      /bin/sh -c "
+      until (/usr/bin/mc alias set difyminio http://dify-minio:9000 minioadmin minioadmin) do echo '...waiting...' && sleep 1; done;
+      /usr/bin/mc mb --ignore-existing difyminio/difyai;
+      echo 'MinIO bucket difyai created successfully';
+      exit 0;
+      "
+    networks:
+      - default
+```
+
+**注意**: 服务名 `storage_minio` 使用下划线，但 API 和插件通过容器名 `dify-minio`（使用短横线，符合 DNS 规范）访问 MinIO。
+
+#### 3.2.2 docker-compose.yaml 修改
+
+在 `docker/docker-compose.yaml` 的共享环境变量 (`x-shared-api-worker-env`) 中添加 `S3_ADDRESS_STYLE`：
+
+```yaml
+  S3_USE_AWS_MANAGED_IAM: ${S3_USE_AWS_MANAGED_IAM:-false}
+  S3_ADDRESS_STYLE: ${S3_ADDRESS_STYLE:-auto}     # 新增此行
+  ARCHIVE_STORAGE_ENABLED: ${ARCHIVE_STORAGE_ENABLED:-false}
+```
+
+#### 3.2.3 环境变量配置
+
+在 `docker/.env` 中配置以下变量：
+
+```env
+# MinIO S3-compatible object storage
+MINIO_ROOT_USER=minioadmin
+MINIO_ROOT_PASSWORD=minioadmin
+EXPOSE_MINIO_API_PORT=9000
+EXPOSE_MINIO_CONSOLE_PORT=9001
+
+# ------------------------------
+# File Storage Configuration (S3)
+# ------------------------------
+
+# 存储类型切换为 S3
+STORAGE_TYPE=s3
+
+# S3 连接配置（使用容器名 dify-minio，避免下划线导致的 DNS 问题）
+S3_ENDPOINT=http://dify-minio:9000
+S3_REGION=us-east-1
+S3_BUCKET_NAME=difyai
+S3_ACCESS_KEY=minioadmin
+S3_SECRET_KEY=minioadmin
+S3_USE_AWS_MANAGED_IAM=false
+S3_ADDRESS_STYLE=path
+
+# ------------------------------
+# Plugin Daemon Storage Configuration (S3)
+# ------------------------------
+
+# 插件存储类型切换为 aws_s3
+PLUGIN_STORAGE_TYPE=aws_s3
+PLUGIN_STORAGE_OSS_BUCKET=difyai
+PLUGIN_S3_USE_AWS=false
+PLUGIN_S3_USE_AWS_MANAGED_IAM=false
+PLUGIN_S3_ENDPOINT=http://dify-minio:9000
+PLUGIN_S3_USE_PATH_STYLE=true
+PLUGIN_AWS_ACCESS_KEY=minioadmin
+PLUGIN_AWS_SECRET_KEY=minioadmin
+PLUGIN_AWS_REGION=us-east-1
+```
+
+**关键配置说明**:
+
+| 变量 | 说明 |
+|------|------|
+| `STORAGE_TYPE=s3` | API 使用 S3 存储后端 |
+| `S3_ADDRESS_STYLE=path` | MinIO 需要 path-style 寻址 (`/bucket/key`) |
+| `S3_ENDPOINT=http://dify-minio:9000` | S3 仅内部访问，API 容器内使用，不对外暴露 |
+| `FILES_URL=http://100.66.1.5` | 外部可访问的 Dify 地址，用于文件预览/下载代理 |
+| `PLUGIN_STORAGE_TYPE=aws_s3` | 插件守护进程使用 S3 存储后端 |
+| `PLUGIN_S3_USE_PATH_STYLE=true` | 插件守护进程也启用 path-style |
+
+#### 3.2.4 代码修改：禁用 S3 预签名 URL
+
+S3 预签名 URL 由 boto3 生成，包含 `S3_ENDPOINT` 中的主机名。由于 MinIO 不对浏览器暴露，
+预签名 URL 无法在客户端使用。需要修改 `AwsS3Storage`，使其预签名方法抛出
+`NotImplementedError`，触发 `FilePresignStorage` 回退到 ticket 方式，通过 Dify API
+代理文件上传下载（格式：`{FILES_API_URL}/files/storage-files/{token}`）。
+
+**`api/extensions/storage/aws_s3_storage.py`** 修改：
+
+```python
+# 将 get_download_url、get_download_urls、get_upload_url 方法体改为：
+raise NotImplementedError
+
+# 同时移除不再使用的 import: from urllib.parse import quote
+
+# 服务端操作（save、load_once、load_stream、delete、exists）不受影响
+```
+
+> 修改后重建容器：`docker compose -f docker-compose.yaml -f docker-compose.override.yaml up -d --build api worker worker_beat`
+
+#### 3.2.5 验证 S3 存储
+
+启动服务后验证：
+
+```bash
+# 1. 检查 MinIO 容器运行状态
+docker logs dify-minio | tail -5
+
+# 2. 检查 bucket 是否创建成功
+docker logs dify-minio-init | tail -3
+# 预期: MinIO bucket difyai created successfully
+
+# 3. 检查 API 存储配置
+docker exec docker-api-1 python3 -c "
+from configs import dify_config
+print(f'STORAGE_TYPE: {dify_config.STORAGE_TYPE}')
+print(f'S3_ENDPOINT: {dify_config.S3_ENDPOINT}')
+print(f'S3_BUCKET_NAME: {dify_config.S3_BUCKET_NAME}')
+print(f'S3_ADDRESS_STYLE: {dify_config.S3_ADDRESS_STYLE}')
+print(f'FILES_URL: {dify_config.FILES_URL}')
+"
+# 预期: STORAGE_TYPE: s3, S3_ENDPOINT: http://dify-minio:9000, ...
+
+# 4. 验证预签名 URL 已禁用（服务端读写仍正常）
+docker exec docker-api-1 python3 -c "
+from extensions.storage.aws_s3_storage import AwsS3Storage
+s = AwsS3Storage()
+try:
+    s.get_upload_url('test')
+    print('ERROR: should raise NotImplementedError')
+except NotImplementedError:
+    print('get_upload_url: NotImplementedError (OK)')
+try:
+    s.get_download_url('test')
+    print('ERROR: should raise NotImplementedError')
+except NotImplementedError:
+    print('get_download_url: NotImplementedError (OK)')
+s.save('_verify/test.txt', b'hello')
+assert s.load_once('_verify/test.txt') == b'hello'
+s.delete('_verify/test.txt')
+print('Server-side save/load/delete: OK')
+"
+
+# 5. 验证 Dify 服务整体可用
+curl -s -o /dev/null -w "%{http_code}\n" http://localhost/console/api/workspaces/current
+# 预期: 405 (Method Not Allowed，服务已启动)
+```
+
 ---
 
 ## 四、构建与启动
@@ -326,6 +506,12 @@ curl -s -o /dev/null -w "%{http_code}" http://localhost/console/api/workspaces/c
 # 4. 检查 Agentbox SSH 访问
 sshpass -p agentbox ssh -o StrictHostKeyChecking=no -p 2222 agentbox@localhost echo "Agentbox OK"
 # 预期: Agentbox OK
+
+# 5. 检查 MinIO 访问
+curl -s -o /dev/null -w "%{http_code}" http://localhost:9001/
+# 预期: 200 (MinIO Console)
+docker logs dify-minio-init | tail -3
+# 预期: MinIO bucket difyai created successfully
 ```
 
 ---

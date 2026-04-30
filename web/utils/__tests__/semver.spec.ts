@@ -92,4 +92,20 @@ describe('semver utilities', () => {
       expect(isEarlierThanVersion('1.0.0', '1.0.0-beta')).toBe(false)
     })
   })
+
+  describe('non-standard version formats', () => {
+    it('should handle version with missing hyphen before prerelease (rc2)', () => {
+      expect(() => compareVersion('1.14.0rc2+custom', '1.14.0')).not.toThrow()
+      expect(compareVersion('1.14.0-rc2+custom', '1.14.0-rc1+custom')).toBe(1)
+      expect(compareVersion('1.14.0rc2', '1.14.0')).toBe(-1)
+      expect(isEqualOrLaterThanVersion('1.14.0', '1.14.0rc2')).toBe(true)
+      expect(isEarlierThanVersion('1.14.0rc2', '1.14.0')).toBe(true)
+    })
+
+    it('should handle version with missing hyphen before alpha/beta/pre', () => {
+      expect(() => compareVersion('1.0.0beta1', '1.0.0')).not.toThrow()
+      expect(() => compareVersion('2.0.0-alpha1', '2.0.0beta2')).not.toThrow()
+      expect(isEarlierThanVersion('1.0.0pre1', '1.0.0')).toBe(true)
+    })
+  })
 })
