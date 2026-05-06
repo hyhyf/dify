@@ -6,6 +6,7 @@ on:
       - "feat/support-agent-sandbox"
     paths:
       - "web/**"
+      - ".github/workflows/build-web-branch.yml"
 
 concurrency:
   group: build-web-branch-${{ github.head_ref || github.run_id }}
