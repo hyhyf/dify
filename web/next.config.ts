@@ -40,11 +40,9 @@ const nextConfig: NextConfig = {
 
     return config
   },
-  productionBrowserSourceMaps: enableProdSourceMaps, // enable browser source map generation during the production build
-  // Configure pageExtensions to include md and mdx
+  productionBrowserSourceMaps: enableProdSourceMaps,
   pageExtensions: ['ts', 'tsx', 'js', 'jsx', 'md', 'mdx'],
   typescript: {
-    // https://nextjs.org/docs/api-reference/next.config.js/ignoring-typescript-errors
     ignoreBuildErrors: true,
   },
   async redirects() {

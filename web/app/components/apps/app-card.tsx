@@ -473,14 +473,14 @@ const AppCard = ({ app, onRefresh, onlineUsers = [] }: AppCardProps) => {
               />
               <AppTypeIcon type={app.mode} wrapperClassName="absolute -bottom-0.5 -right-0.5 w-4 h-4 shadow-sm" className="h-3 w-3" />
             </div>
-            <div className="w-0 grow py-[1px]">
+            <div className="grow min-w-0 py-[1px]">
               <div className="flex items-center text-sm font-semibold leading-5 text-text-secondary">
-                <div className="truncate" title={app.name}>{app.name}</div>
+                <div className="truncate w-full" title={app.name}>{app.name}</div>
               </div>
               <div className="flex items-center gap-1 text-[10px] font-medium leading-[18px] text-text-tertiary">
-                <div className="truncate" title={app.author_name}>{app.author_name}</div>
+                <div className="truncate w-full" title={app.author_name}>{app.author_name}</div>
                 <div>·</div>
-                <div className="truncate" title={EditTimeText}>{EditTimeText}</div>
+                <div className="truncate w-full" title={EditTimeText}>{EditTimeText}</div>
               </div>
             </div>
             <div className="flex h-5 w-5 shrink-0 items-center justify-center">
