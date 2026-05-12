@@ -28,7 +28,7 @@
   "scripts": {
     "analyze": "next experimental-analyze",
     "analyze-component": "node ./scripts/analyze-component.js",
-    "build": "next build",
+    "build": "TURBOPACK=0 next build",
     "build:vinext": "vinext build",
     "dev": "next dev",
     "dev:inspect": "next dev --inspect",

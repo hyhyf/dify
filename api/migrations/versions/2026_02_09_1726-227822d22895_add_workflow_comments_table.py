@@ -48,12 +48,6 @@ def upgrade():
         sa.Column("created_by", models.types.StringUUID(), nullable=False),
         sa.Column("created_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.text("CURRENT_TIMESTAMP"), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["comment_id"],
-            ["workflow_comments.id"],
-            name=op.f("workflow_comment_replies_comment_id_fkey"),
-            ondelete="CASCADE",
-        ),
         sa.PrimaryKeyConstraint("id", name="workflow_comment_replies_pkey"),
     )
     with op.batch_alter_table("workflow_comment_replies", schema=None) as batch_op:
@@ -66,18 +60,6 @@ def upgrade():
         sa.Column("comment_id", models.types.StringUUID(), nullable=False),
         sa.Column("reply_id", models.types.StringUUID(), nullable=True),
         sa.Column("mentioned_user_id", models.types.StringUUID(), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["comment_id"],
-            ["workflow_comments.id"],
-            name=op.f("workflow_comment_mentions_comment_id_fkey"),
-            ondelete="CASCADE",
-        ),
-        sa.ForeignKeyConstraint(
-            ["reply_id"],
-            ["workflow_comment_replies.id"],
-            name=op.f("workflow_comment_mentions_reply_id_fkey"),
-            ondelete="CASCADE",
-        ),
         sa.PrimaryKeyConstraint("id", name="workflow_comment_mentions_pkey"),
     )
     with op.batch_alter_table("workflow_comment_mentions", schema=None) as batch_op:

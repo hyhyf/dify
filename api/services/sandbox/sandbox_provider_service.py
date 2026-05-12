@@ -80,7 +80,9 @@ class SandboxProviderService:
                     providers.append(
                         SandboxProviderApiEntity(
                             provider_type=provider_type,
-                            is_active=current_provider is not None and system_config is not None and system_config.id == current_provider.id,
+                            is_active=current_provider is not None
+                            and system_config is not None
+                            and system_config.id == current_provider.id,
                             is_system_configured=system_config is not None,
                             config_schema=[c.model_dump() for c in schema],
                         )

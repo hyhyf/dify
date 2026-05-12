@@ -1,26 +1,26 @@
 """Token-based file proxy controller for storage operations.
- 
+
 This controller handles file download and upload operations using opaque UUID tokens.
 The token maps to the real storage key in Redis, so the actual storage path is never
 exposed in the URL.
- 
+
 Routes:
     GET  /files/storage-files/{token} - Download a file
     PUT  /files/storage-files/{token} - Upload a file
- 
+
 The operation type (download/upload) is determined by the ticket stored in Redis,
 not by the HTTP method. This ensures a download ticket cannot be used for upload
 and vice versa.
 """
- 
+
 import logging
 import time
 from urllib.parse import quote
- 
+
 from flask import Response, request
 from flask_restx import Resource
 from werkzeug.exceptions import Forbidden, NotFound, RequestEntityTooLarge
- 
+
 from controllers.files import files_ns
 from extensions.ext_storage import storage
 from services.storage_ticket_service import StorageTicketService

@@ -222,6 +222,8 @@ class DatabaseConfig(BaseSettings):
             else:
                 merged_options = timezone_opt
             connect_args = {"options": merged_options}
+        elif self.SQLALCHEMY_DATABASE_URI_SCHEME == "mysql+pymysql":
+            connect_args = {"init_command": "SET time_zone = '+00:00'"}
 
         return {
             "pool_size": self.SQLALCHEMY_POOL_SIZE,

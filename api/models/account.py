@@ -241,7 +241,9 @@ class Tenant(TypeBase):
     )
     name: Mapped[str] = mapped_column(String(255))
     encrypt_public_key: Mapped[str | None] = mapped_column(LongText, default=None)
-    plan: Mapped[str] = mapped_column("plan", String(255), server_default=sa.text("'basic'"), default="basic", quote=True)
+    plan: Mapped[str] = mapped_column(
+        "plan", String(255), server_default=sa.text("'basic'"), default="basic", quote=True
+    )
     status: Mapped[TenantStatus] = mapped_column(
         EnumText(TenantStatus, length=255), server_default=sa.text("'normal'"), default=TenantStatus.NORMAL
     )

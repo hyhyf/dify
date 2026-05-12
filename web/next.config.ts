@@ -21,12 +21,7 @@ const withMDX = createMDX()
 const nextConfig: NextConfig = {
   basePath: env.NEXT_PUBLIC_BASE_PATH,
   transpilePackages: ['@t3-oss/env-core', '@t3-oss/env-nextjs', 'echarts', 'zrender'],
-  turbopack: {
-    root: process.cwd(),
-    rules: codeInspectorPlugin({
-      bundler: 'turbopack',
-    }),
-  },
+  turbopack: false,
   webpack: (config, { dev: _dev, isServer: _isServer }) => {
     config.plugins.push(codeInspectorPlugin({ bundler: 'webpack' }))
 
@@ -57,9 +52,6 @@ const nextConfig: NextConfig = {
   output: 'standalone',
   compiler: {
     removeConsole: isDev ? false : { exclude: ['warn', 'error'] },
-  },
-  experimental: {
-    turbopackFileSystemCacheForDev: false,
   },
 }
 
