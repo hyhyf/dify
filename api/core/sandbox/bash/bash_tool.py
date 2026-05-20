@@ -102,7 +102,7 @@ class SandboxBashTool(Tool):
             with with_connection(self._sandbox) as conn:
                 # Build command with embedded environment variables
                 env_exports = (
-                    f"export PATH={self._tools_path}:/usr/local/bin:/usr/bin:/bin && "
+                    f"export PATH={self._tools_path}:$PATH && "
                     f"export DIFY_CLI_CONFIG={self._tools_path}/{DifyCli.CONFIG_FILENAME} && "
                 )
                 full_command = env_exports + command
@@ -111,7 +111,6 @@ class SandboxBashTool(Tool):
                 sandbox_debug("bash_tool", "cmd_list", cmd_list)
 
                 tool_env = {
-                    "PATH": f"{self._tools_path}:/usr/local/bin:/usr/bin:/bin",
                     "DIFY_CLI_CONFIG": f"{self._tools_path}/{DifyCli.CONFIG_FILENAME}",
                 }
                 future = submit_command(
