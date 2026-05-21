@@ -425,6 +425,7 @@ class LoopNode(LLMUsageTrackingMixin, Node[LoopNodeData]):
             variable_pool=self.graph_runtime_state.variable_pool,
             start_at=start_at.timestamp(),
         )
+        graph_runtime_state_copy.set_sandbox(self.graph_runtime_state.sandbox)
 
         return self.graph_runtime_state.create_child_engine(
             workflow_id=self.workflow_id,

@@ -610,6 +610,7 @@ class IterationNode(LLMUsageTrackingMixin, Node[IterationNodeData]):
             total_tokens=0,
             node_run_steps=0,
         )
+        graph_runtime_state_copy.set_sandbox(self.graph_runtime_state.sandbox)
         root_node_id = self.node_data.start_node_id
         if root_node_id is None:
             raise StartNodeIdNotFoundError(f"field start_node_id in iteration {self._node_id} not found")
