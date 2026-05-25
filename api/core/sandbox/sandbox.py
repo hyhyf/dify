@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
@@ -100,9 +101,17 @@ class Sandbox:
         return self._cancel_event.is_set()
 
     def wait_ready(self, timeout: float | None = None) -> None:
-        # Block until initialization completes, fails, or is cancelled.
+        t0 = time.monotonic()
         if not self._ready_event.wait(timeout=timeout):
             raise TimeoutError("Sandbox initialization timed out")
+        elapsed = time.monotonic() - t0
+        logger.debug(
+            "[BENCHMARK] sandbox %s wait_ready took %.3fs (cancelled=%s, has_error=%s)",
+            self._id,
+            elapsed,
+            self._cancel_event.is_set(),
+            self._init_error is not None,
+        )
         if self._cancel_event.is_set():
             raise RuntimeError("Sandbox initialization was cancelled")
         if self._init_error is not None:

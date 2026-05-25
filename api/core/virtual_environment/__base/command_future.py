@@ -137,6 +137,7 @@ class CommandFuture:
         stdout_buf = bytearray()
         stderr_buf = bytearray()
         is_combined_stream = self._stdout_transport is self._stderr_transport
+        t_exec_start = time.monotonic()
 
         try:
             with ThreadPoolExecutor(max_workers=2) as executor:
@@ -145,11 +146,31 @@ class CommandFuture:
                 if not is_combined_stream:
                     stderr_future = executor.submit(self._drain_transport, self._stderr_transport, stderr_buf)
 
+                t0 = time.monotonic()
                 exit_code = self._wait_for_completion()
+                t_wait = time.monotonic() - t0
+                logger.debug(
+                    "[BENCHMARK] CommandFuture pid=%s _wait_for_completion took %.3fs", self._pid, t_wait
+                )
 
+                t0 = time.monotonic()
                 stdout_future.result()
                 if stderr_future:
                     stderr_future.result()
+                t_drain = time.monotonic() - t0
+                logger.debug(
+                    "[BENCHMARK] CommandFuture pid=%s drain transports took %.3fs", self._pid, t_drain
+                )
+
+            t_exec_total = time.monotonic() - t_exec_start
+            logger.debug(
+                "[BENCHMARK] CommandFuture pid=%s _execute TOTAL: %.3fs (wait=%.3fs, drain=%.3fs, exit_code=%s)",
+                self._pid,
+                t_exec_total,
+                t_wait,
+                t_drain,
+                exit_code,
+            )
 
             with self._lock:
                 if not self._cancelled:

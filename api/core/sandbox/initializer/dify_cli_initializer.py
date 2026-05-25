@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 from io import BytesIO
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from core.sandbox.sandbox import Sandbox
 from core.session.cli_api import CliApiSessionManager, CliContext
 from core.skill.constants import SkillAttrs
 from core.skill.entities import ToolAccessPolicy
-from core.virtual_environment.__base.helpers import pipeline
+from core.virtual_environment.__base.helpers import pipeline, try_execute
 
 from ..bash.dify_cli import DifyCliConfig, DifyCliLocator
 from ..entities import DifyCli
@@ -24,30 +25,65 @@ class DifyCliInitializer(AsyncSandboxInitializer):
         self._tools: list[object] = []
 
     def initialize(self, sandbox: Sandbox, ctx: SandboxInitializeContext) -> None:
+        t0 = time.monotonic()
         vm = sandbox.vm
         cli = DifyCli(sandbox.id)
 
-        # FIXME(Mairuis): should be more robust, effectively.
         binary = self._locator.resolve(vm.metadata.os, vm.metadata.arch)
+        expected_size = binary.path.stat().st_size
+        t_resolve = time.monotonic() - t0
+        logger.debug("[BENCHMARK] DifyCli init resolve took %.3fs", t_resolve)
 
-        pipeline(vm).add(["mkdir", "-p", cli.bin_dir], error_message="Failed to create dify CLI directory").execute(
-            raise_on_error=True
+        # Merge mkdir + size_check into one SSH pipeline (save ~0.3s round-trip)
+        shared_bin = "/opt/dify-cli/bin/dify"
+        shared_size = 0
+        t0 = time.monotonic()
+        try:
+            size_check = try_execute(
+                vm,
+                [
+                    "sh",
+                    "-c",
+                    f'mkdir -p "{cli.bin_dir}" && '
+                    f'test -f "{shared_bin}" && stat -c%s "{shared_bin}" || echo 0',
+                ],
+                cwd="/",
+            )
+            shared_size = int(size_check.stdout.decode("utf-8", errors="replace").strip() or 0)
+        except Exception:
+            pass
+        t_mkdir_check = time.monotonic() - t0
+        logger.debug(
+            "[BENCHMARK] DifyCli init mkdir+size_check took %.3fs (shared_size=%d)", t_mkdir_check, shared_size
         )
 
-        vm.upload_file(cli.bin_path, BytesIO(binary.path.read_bytes()))
+        t0 = time.monotonic()
+        if shared_size == expected_size:
+            # Copy from pre-installed shared path (fast SSH cp + chmod, no SFTP overhead)
+            pipeline(vm).add(
+                ["sh", "-c", f"cp '{shared_bin}' '{cli.bin_path}' && chmod +x '{cli.bin_path}'"],
+                error_message="Failed to copy dify CLI from shared location",
+            ).execute(raise_on_error=True)
+            t_binary = time.monotonic() - t0
+            logger.debug("[BENCHMARK] DifyCli init cp+chmod took %.3fs", t_binary)
+            logger.info("Dify CLI copied from shared location, path=%s", cli.bin_path)
+        else:
+            vm.upload_file(cli.bin_path, BytesIO(binary.path.read_bytes()))
 
-        pipeline(vm).add(
-            [
-                "sh",
-                "-c",
-                f"cat '{cli.bin_path}' > '{cli.bin_path}.tmp' && "
-                f"mv '{cli.bin_path}.tmp' '{cli.bin_path}' && "
-                f"chmod +x '{cli.bin_path}'",
-            ],
-            error_message="Failed to mark dify CLI as executable",
-        ).execute(raise_on_error=True)
+            pipeline(vm).add(
+                [
+                    "sh",
+                    "-c",
+                    f"cat '{cli.bin_path}' > '{cli.bin_path}.tmp' && "
+                    f"mv '{cli.bin_path}.tmp' '{cli.bin_path}' && "
+                    f"chmod +x '{cli.bin_path}'",
+                ],
+                error_message="Failed to mark dify CLI as executable",
+            ).execute(raise_on_error=True)
+            t_binary = time.monotonic() - t0
+            logger.debug("[BENCHMARK] DifyCli init upload+chmod took %.3fs", t_binary)
 
-        logger.info("Dify CLI uploaded to sandbox, path=%s", cli.bin_path)
+            logger.info("Dify CLI uploaded to sandbox, path=%s", cli.bin_path)
 
         bundle = sandbox.attrs.get(SkillAttrs.BUNDLE)
         if bundle is None or bundle.get_tool_dependencies().is_empty():

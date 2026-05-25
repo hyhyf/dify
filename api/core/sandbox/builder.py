@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import threading
+import time
 from collections.abc import Mapping, Sequence
 from contextlib import nullcontext
 from typing import TYPE_CHECKING, Any, cast
@@ -115,6 +116,8 @@ class SandboxBuilder:
         if self._app_id is None:
             raise ValueError("app_id is required, call .app() before .build()")
 
+        t_build_start = time.monotonic()
+
         ctx = SandboxInitializeContext(
             tenant_id=self._tenant_id,
             app_id=self._app_id,
@@ -124,6 +127,7 @@ class SandboxBuilder:
         vm: VirtualEnvironment | None = None
         sandbox: Sandbox | None = None
         try:
+            t0 = time.monotonic()
             vm_class = _get_sandbox_class(self._sandbox_type)
             vm = vm_class(
                 tenant_id=self._tenant_id,
@@ -132,6 +136,13 @@ class SandboxBuilder:
                 user_id=self._user_id,
             )
             vm.open_enviroment()
+            t_vm_open = time.monotonic() - t0
+            logger.debug(
+                "[BENCHMARK] sandbox_builder vm open_enviroment took %.3fs (type=%s)",
+                t_vm_open,
+                self._sandbox_type,
+            )
+
             sandbox = Sandbox(
                 vm=vm,
                 storage=self._storage,
@@ -141,9 +152,18 @@ class SandboxBuilder:
                 assets_id=self._assets_id,
             )
 
+            t0 = time.monotonic()
             for init in self._initializers:
                 if isinstance(init, SyncSandboxInitializer):
+                    init_class = init.__class__.__name__
                     init.initialize(sandbox, ctx)
+                    logger.debug(
+                        "[BENCHMARK] sandbox_builder sync init %s completed", init_class
+                    )
+            t_sync_init = time.monotonic() - t0
+            logger.debug(
+                "[BENCHMARK] sandbox_builder sync init total took %.3fs", t_sync_init
+            )
         except Exception as exc:
             logger.exception(
                 "Failed to initialize sandbox synchronously: tenant_id=%s, app_id=%s", self._tenant_id, self._app_id
@@ -164,6 +184,7 @@ class SandboxBuilder:
         _sandbox: Sandbox = sandbox
 
         def initialize() -> None:
+            t_async_start = time.monotonic()
             try:
                 app_context = flask_app.app_context() if flask_app is not None else nullcontext()
                 with app_context:
@@ -173,12 +194,27 @@ class SandboxBuilder:
 
                         if _sandbox.is_cancelled():
                             return
+                        init_class = init.__class__.__name__
+                        t_init0 = time.monotonic()
                         init.initialize(_sandbox, ctx)
+                        t_init_elapsed = time.monotonic() - t_init0
+                        logger.debug(
+                            "[BENCHMARK] sandbox_builder async init %s took %.3fs",
+                            init_class,
+                            t_init_elapsed,
+                        )
 
                     if _sandbox.is_cancelled():
                         return
+                    t0 = time.monotonic()
                     _sandbox.mount()
+                    t_mount = time.monotonic() - t0
+                    logger.debug("[BENCHMARK] sandbox_builder mount took %.3fs", t_mount)
                     _sandbox.mark_ready()
+                    t_async_total = time.monotonic() - t_async_start
+                    logger.debug(
+                        "[BENCHMARK] sandbox_builder async init TOTAL took %.3fs", t_async_total
+                    )
             except Exception as exc:
                 try:
                     logger.exception(
@@ -204,6 +240,14 @@ class SandboxBuilder:
             )
             sandbox.release()
             raise RuntimeError("Sandbox initialization failed")
+
+        t_build_total = time.monotonic() - t_build_start
+        logger.debug(
+            "[BENCHMARK] sandbox_builder build() sync phase took %.3fs (vm_open=%.3fs, sync_init=%.3fs)",
+            t_build_total,
+            t_vm_open,
+            t_sync_init,
+        )
         return sandbox
 
     @staticmethod

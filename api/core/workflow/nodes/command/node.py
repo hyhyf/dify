@@ -1,4 +1,5 @@
 import logging
+import time
 from collections.abc import Mapping, Sequence
 from typing import Any
 
@@ -72,15 +73,42 @@ class CommandNode(Node[CommandNodeData]):
                 error_type="CommandNodeError",
             )
 
+        t_node_start = time.monotonic()
         try:
+            t0 = time.monotonic()
             sandbox.wait_ready(timeout=SANDBOX_READY_TIMEOUT)
+            t_wait_ready = time.monotonic() - t0
+            logger.debug(
+                "[BENCHMARK] command_node %s sandbox.wait_ready took %.3fs", self.id, t_wait_ready
+            )
+
+            t0 = time.monotonic()
             with with_connection(sandbox.vm) as conn:
+                t_establish_conn = time.monotonic() - t0
+                logger.debug(
+                    "[BENCHMARK] command_node %s establish_connection took %.3fs", self.id, t_establish_conn
+                )
+
                 command = ["bash", "-c", raw_command]
 
                 sandbox_debug("command_node", "command", command)
 
+                t0 = time.monotonic()
                 future = submit_command(sandbox.vm, conn, command, cwd=working_directory)
+                t_submit = time.monotonic() - t0
+                logger.debug(
+                    "[BENCHMARK] command_node %s submit_command took %.3fs", self.id, t_submit
+                )
+
+                t0 = time.monotonic()
                 result = future.result(timeout=COMMAND_NODE_TIMEOUT_SECONDS)
+                t_command_exec = time.monotonic() - t0
+                logger.debug(
+                    "[BENCHMARK] command_node %s command execution took %.3fs (exit_code=%s)",
+                    self.id,
+                    t_command_exec,
+                    result.exit_code,
+                )
 
                 outputs: dict[str, Any] = {
                     "stdout": result.stdout.decode("utf-8", errors="replace"),
@@ -91,6 +119,17 @@ class CommandNode(Node[CommandNodeData]):
                 process_data = {"command": command, "working_directory": working_directory}
 
                 sandbox_debug("command_node", "outputs", result.debug_message)
+
+                t_node_total = time.monotonic() - t_node_start
+                logger.debug(
+                    "[BENCHMARK] command_node %s total: %.3fs (wait_ready=%.3fs, connect=%.3fs, submit=%.3fs, exec=%.3fs)",
+                    self.id,
+                    t_node_total,
+                    t_wait_ready,
+                    t_establish_conn,
+                    t_submit,
+                    t_command_exec,
+                )
 
                 if result.exit_code not in (None, 0):
                     stderr_text = result.stderr.decode("utf-8", errors="replace")
