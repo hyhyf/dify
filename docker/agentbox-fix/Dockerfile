@@ -34,25 +34,9 @@ RUN sed -i '/conda\.sh\|conda activate/d' /etc/bash.bashrc 2>/dev/null || true
 RUN sed -i 's|^export PATH="/usr/bin:/bin.*$|export PATH="/opt/conda/condabin:/opt/conda/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"|' /etc/environment
 
 # 7. Add fast static conda env vars to profiles (no conda.sh overhead)
-RUN cat >> /etc/profile <<'EOF'
+RUN printf '\n# Conda environment (static exports, no conda.sh overhead)\nexport CONDA_PREFIX=/opt/conda\nexport CONDA_DEFAULT_ENV=base\nexport CONDA_EXE=/opt/conda/bin/conda\nexport CONDA_PYTHON_EXE=/opt/conda/bin/python\nexport CONDA_SHLVL=1\n' >> /etc/profile
 
-# Conda environment (static exports, no conda.sh overhead)
-export CONDA_PREFIX=/opt/conda
-export CONDA_DEFAULT_ENV=base
-export CONDA_EXE=/opt/conda/bin/conda
-export CONDA_PYTHON_EXE=/opt/conda/bin/python
-export CONDA_SHLVL=1
-EOF
-
-RUN cat >> /home/agentbox/.profile <<'EOF'
-
-# Conda environment (static exports, no conda.sh overhead)
-export CONDA_PREFIX=/opt/conda
-export CONDA_DEFAULT_ENV=base
-export CONDA_EXE=/opt/conda/bin/conda
-export CONDA_PYTHON_EXE=/opt/conda/bin/python
-export CONDA_SHLVL=1
-EOF
+RUN printf '\n# Conda environment (static exports, no conda.sh overhead)\nexport CONDA_PREFIX=/opt/conda\nexport CONDA_DEFAULT_ENV=base\nexport CONDA_EXE=/opt/conda/bin/conda\nexport CONDA_PYTHON_EXE=/opt/conda/bin/python\nexport CONDA_SHLVL=1\n' >> /home/agentbox/.profile
 
 RUN chown agentbox:agentbox /home/agentbox/.profile
 
