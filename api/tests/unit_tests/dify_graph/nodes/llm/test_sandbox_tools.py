@@ -245,6 +245,89 @@ class TestWrapperInvoke:
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
         assert "my_tool_my_provider.my_tool" in command
 
+    def test_invoke_file_ref_stripped(self, mock_bash_tool: MagicMock) -> None:
+        """[File: ...] notation is stripped to bare path for CLI arg."""
+        entity = _make_tool_entity("watermark")
+        real_tool = MagicMock()
+        real_tool.entity = entity
+        real_tool.runtime = MagicMock()
+        real_tool.runtime.runtime_parameters = {}
+
+        ref = ToolReference(
+            uuid="wf-1",
+            type=ToolProviderType.MCP,
+            provider="srv",
+            tool_name="watermark",
+        )
+
+        wrapper = SandboxNativeToolWrapper(
+            tool_ref=ref,
+            real_tool=real_tool,
+            bash_tool=mock_bash_tool,
+        )
+
+        file_ref = "[File: /workspace/sandboxes/abc/true.jpg]"
+        list(wrapper._invoke("u", {"image_file": file_ref, "text": "hello"}))
+
+        command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
+        assert "[File:" not in command
+        assert "/workspace/sandboxes/abc/true.jpg" in command
+        assert "watermark_wf-1" in command
+
+    def test_invoke_file_ref_with_spaces(self, mock_bash_tool: MagicMock) -> None:
+        """[File: path with spaces] is handled correctly."""
+        entity = _make_tool_entity("wm")
+        real_tool = MagicMock()
+        real_tool.entity = entity
+        real_tool.runtime = MagicMock()
+        real_tool.runtime.runtime_parameters = {}
+
+        ref = ToolReference(
+            uuid="wm",
+            type=ToolProviderType.MCP,
+            provider="s",
+            tool_name="wm",
+        )
+
+        wrapper = SandboxNativeToolWrapper(
+            tool_ref=ref,
+            real_tool=real_tool,
+            bash_tool=mock_bash_tool,
+        )
+
+        file_ref = "[File: /workspace/my file.png]"
+        list(wrapper._invoke("u", {"image_file": file_ref}))
+
+        command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
+        assert "[File:" not in command
+        assert "/workspace/my file.png" in command
+
+    def test_invoke_plain_path_preserved(self, mock_bash_tool: MagicMock) -> None:
+        """Plain file path (no [File:] wrapper) is passed through unchanged."""
+        entity = _make_tool_entity("wm")
+        real_tool = MagicMock()
+        real_tool.entity = entity
+        real_tool.runtime = MagicMock()
+        real_tool.runtime.runtime_parameters = {}
+
+        ref = ToolReference(
+            uuid="wm",
+            type=ToolProviderType.MCP,
+            provider="s",
+            tool_name="wm",
+        )
+
+        wrapper = SandboxNativeToolWrapper(
+            tool_ref=ref,
+            real_tool=real_tool,
+            bash_tool=mock_bash_tool,
+        )
+
+        list(wrapper._invoke("u", {"image_file": "/workspace/photo.jpg"}))
+
+        command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
+        assert "/workspace/photo.jpg" in command
+
 
 # ── _build_sandbox_native_wrappers tests ───────────────────────────
 

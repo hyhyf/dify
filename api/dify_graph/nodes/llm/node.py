@@ -181,7 +181,18 @@ class SandboxNativeToolWrapper(Tool):
         app_id: str | None = None,
         message_id: str | None = None,
     ) -> Generator[ToolInvokeMessage, None, None]:
+        import re
         import shlex
+
+        _file_ref_pattern = re.compile(r"^\[File:\s*(.+?)\]$")
+
+        def _clean_value(val: object) -> str:
+            """Strip [File: ...] notation from file reference strings."""
+            if isinstance(val, str):
+                m = _file_ref_pattern.match(val)
+                if m:
+                    return m.group(1).strip()
+            return str(val)
 
         # Build dify-cli command from native JSON parameters
         tool_name = self.entity.identity.name
@@ -203,9 +214,9 @@ class SandboxNativeToolWrapper(Tool):
                     cli_parts.append(f"--{key}")
             elif isinstance(value, list):
                 for item in value:
-                    cli_parts.append(f"--{key} {shlex.quote(str(item))}")
+                    cli_parts.append(f"--{key} {shlex.quote(_clean_value(item))}")
             else:
-                cli_parts.append(f"--{key} {shlex.quote(str(value))}")
+                cli_parts.append(f"--{key} {shlex.quote(_clean_value(value))}")
 
         command = " ".join(cli_parts)
 
