@@ -64,11 +64,12 @@ class SandboxBashTool(Tool):
             ],
             description=ToolDescription(
                 human=I18nObject(
-                    en_US="Execute bash commands in current working directory",
+                    en_US="Execute bash commands in sandbox environment",
                 ),
-                llm="Execute bash commands in current working directory. "
-                "Use this tool to run shell commands, scripts, or interact with the system. "
-                "The command will be executed in the current working directory. "
+                llm="Execute bash commands in the sandbox environment. "
+                "Use bash for file operations, code execution, and system commands that require sandbox isolation. "
+                "For data-fetching, API-calling, or query tools, prefer using the registered tools directly "
+                "instead of invoking them through bash. "
                 "IMPORTANT: If you generate any output files (images, documents, etc.) that need to be "
                 "returned or referenced later, you MUST save them to the 'output/' directory "
                 "(e.g., 'mkdir -p output && cp result.png output/'). Only files in output/ will be collected.",

@@ -141,7 +141,91 @@ if TYPE_CHECKING:
     from dify_graph.file.models import File
     from dify_graph.runtime import GraphRuntimeState
 
+from core.tools.__base.tool import Tool
+from core.tools.entities.tool_entities import ToolProviderType
+
 logger = logging.getLogger(__name__)
+
+
+class SandboxNativeToolWrapper(Tool):
+    """Wraps a sandbox tool for native function-call presentation to the LLM.
+
+    The LLM sees the real tool's JSON Schema (name, description, parameters)
+    via native function calling. Execution is routed through bash → dify-cli
+    inside the sandbox to preserve file transfer and credential resolution.
+    """
+
+    def __init__(
+        self,
+        tool_ref: ToolReference | None,
+        real_tool: Tool | None,
+        bash_tool: Tool,
+        entity: ToolEntity | None = None,
+        runtime: ToolRuntime | None = None,
+    ) -> None:
+        self._tool_ref = tool_ref
+        self._bash_tool = bash_tool
+        if real_tool is not None:
+            super().__init__(entity=real_tool.entity, runtime=real_tool.runtime)
+        else:
+            super().__init__(entity=entity, runtime=runtime)  # type: ignore[arg-type]
+
+    def tool_provider_type(self) -> ToolProviderType:
+        return ToolProviderType.BUILT_IN
+
+    def _invoke(
+        self,
+        user_id: str,
+        tool_parameters: dict[str, Any],
+        conversation_id: str | None = None,
+        app_id: str | None = None,
+        message_id: str | None = None,
+    ) -> Generator[ToolInvokeMessage, None, None]:
+        import shlex
+
+        # Build dify-cli command from native JSON parameters
+        tool_name = self.entity.identity.name
+        if self._tool_ref and self._tool_ref.tool_name:
+            tool_name = self._tool_ref.tool_name
+
+        uuid_part = ""
+        if self._tool_ref and self._tool_ref.uuid:
+            uuid_part = f"_{self._tool_ref.uuid}"
+        elif self._tool_ref:
+            uuid_part = f"_{self._tool_ref.provider}.{self._tool_ref.tool_name}"
+
+        cli_parts = [f"{tool_name}{uuid_part}"]
+        for key, value in tool_parameters.items():
+            if value is None:
+                continue
+            if isinstance(value, bool):
+                if value:
+                    cli_parts.append(f"--{key}")
+            elif isinstance(value, list):
+                for item in value:
+                    cli_parts.append(f"--{key} {shlex.quote(str(item))}")
+            else:
+                cli_parts.append(f"--{key} {shlex.quote(str(value))}")
+
+        command = " ".join(cli_parts)
+
+        # Route through sandbox bash tool (bypass invoke() to avoid double type conversion)
+        yield from self._bash_tool._invoke(
+            user_id=user_id,
+            tool_parameters={"bash": command},
+            conversation_id=conversation_id,
+            app_id=app_id,
+            message_id=message_id,
+        )
+
+    def fork_tool_runtime(self, runtime: ToolRuntime) -> Tool:
+        return self.__class__(
+            tool_ref=self._tool_ref,
+            real_tool=None,
+            bash_tool=self._bash_tool,
+            entity=self.entity.model_copy() if hasattr(self.entity, 'model_copy') else self.entity,
+            runtime=runtime,
+        )
 
 
 class LLMNode(Node[LLMNodeData]):
@@ -1922,6 +2006,58 @@ class LLMNode(Node[LLMNodeData]):
                 tool.enabled = False
         return tool_dependencies
 
+    def _build_sandbox_native_wrappers(
+        self,
+        tool_dependencies: ToolDependencies | None,
+        bash_tool: Tool,
+    ) -> list[Tool]:
+        from core.app.entities.app_invoke_entities import InvokeFrom
+        from core.skill.entities.skill_metadata import ToolReference
+        from core.tools.entities.tool_entities import ToolInvokeFrom
+        from core.tools.tool_manager import ToolManager
+
+        if not tool_dependencies or tool_dependencies.is_empty():
+            return []
+
+        ref_map: dict[str, ToolReference] = {}
+        for ref in tool_dependencies.references:
+            ref_map[f"{ref.provider}.{ref.tool_name}"] = ref
+
+        invoke_from = getattr(self, "invoke_from", InvokeFrom.DEBUGGER)
+
+        wrappers: list[Tool] = []
+        for dep in tool_dependencies.dependencies:
+            if not dep.enabled:
+                continue
+            try:
+                ref = ref_map.get(f"{dep.provider}.{dep.tool_name}")
+                credential_id = ref.credential_id if ref else None
+
+                real_tool = ToolManager.get_tool_runtime(
+                    provider_type=dep.type,
+                    provider_id=dep.provider,
+                    tool_name=dep.tool_name,
+                    tenant_id=self.tenant_id,
+                    invoke_from=invoke_from,
+                    tool_invoke_from=ToolInvokeFrom.AGENT,
+                    credential_id=credential_id,
+                )
+
+                wrapper = SandboxNativeToolWrapper(
+                    tool_ref=ref,
+                    real_tool=real_tool,
+                    bash_tool=bash_tool,
+                )
+                wrappers.append(wrapper)
+            except Exception as e:
+                logger.warning(
+                    "Failed to build sandbox native wrapper for %s.%s: %s",
+                    dep.provider, dep.tool_name, e,
+                )
+                continue
+
+        return wrappers
+
     def _invoke_llm_with_tools(
         self,
         model_instance: ModelInstance,
@@ -1974,13 +2110,16 @@ class LLMNode(Node[LLMNodeData]):
         result: LLMGenerationData | None = None
 
         with SandboxBashSession(sandbox=sandbox, node_id=self.id, tools=tool_dependencies) as session:
+            # Build native function-call wrappers that route through sandbox bash→dify-cli
+            native_wrappers = self._build_sandbox_native_wrappers(tool_dependencies, session.bash_tool)
+
             prompt_files = self._extract_prompt_files(variable_pool)
             model_features = self._get_model_features(model_instance)
 
             strategy = StrategyFactory.create_strategy(
                 model_features=model_features,
                 model_instance=model_instance,
-                tools=[session.bash_tool],
+                tools=native_wrappers + [session.bash_tool],
                 files=prompt_files,
                 max_iterations=self._node_data.max_iterations or 100,
                 agent_strategy=AgentEntity.Strategy.FUNCTION_CALLING,

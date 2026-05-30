@@ -77,7 +77,7 @@ class ToolReplacer:
             return f"[Tool not found or disabled: {tool_id}]"
         if not tool_ref.enabled:
             return ""
-        return f"[Executable: {tool_ref.tool_name}_{tool_ref.uuid} --help command]"
+        return f"[Tool: {tool_ref.tool_name}]"
 
 
 class ToolGroupReplacer:
@@ -101,7 +101,7 @@ class ToolGroupReplacer:
                 continue
             if not tool_ref.enabled:
                 continue
-            enabled_renders.append(f"[Executable: {tool_ref.tool_name}_{tool_ref.uuid} --help command]")
+            enabled_renders.append(f"[Tool: {tool_ref.tool_name}]")
 
         if not enabled_renders:
             return ""
