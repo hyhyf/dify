@@ -181,18 +181,27 @@ class SandboxNativeToolWrapper(Tool):
         app_id: str | None = None,
         message_id: str | None = None,
     ) -> Generator[ToolInvokeMessage, None, None]:
+        import os
         import re
         import shlex
 
         _file_ref_pattern = re.compile(r"^\[File:\s*(.+?)\]$")
 
         def _clean_value(val: object) -> str:
-            """Strip [File: ...] notation from file reference strings."""
-            if isinstance(val, str):
-                m = _file_ref_pattern.match(val)
-                if m:
-                    return m.group(1).strip()
-            return str(val)
+            """Strip [File: ...] notation and resolve to absolute sandbox path."""
+            if not isinstance(val, str):
+                return str(val)
+            m = _file_ref_pattern.match(val)
+            if m:
+                raw_path = m.group(1).strip()
+            else:
+                raw_path = val
+            # Resolve relative paths against sandbox working directory
+            if not os.path.isabs(raw_path):
+                raw_path = os.path.normpath(
+                    os.path.join(self._bash_tool._sandbox.get_working_path(), raw_path)
+                )
+            return raw_path
 
         # Build dify-cli command from native JSON parameters
         tool_name = self.entity.identity.name

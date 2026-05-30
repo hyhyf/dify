@@ -61,6 +61,8 @@ def mock_bash_tool() -> MagicMock:
     bash._invoke.return_value = iter([MagicMock(spec=ToolInvokeMessage)])
     bash.entity = MagicMock()
     bash.entity.identity.name = "bash"
+    bash._sandbox = MagicMock()
+    bash._sandbox.get_working_path.return_value = "/workspace/sandboxes/test-sandbox"
     return bash
 
 
@@ -271,7 +273,8 @@ class TestWrapperInvoke:
 
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
         assert "[File:" not in command
-        assert "/workspace/sandboxes/abc/true.jpg" in command
+        # Absolute path should be preserved as-is (not joined with working dir)
+        assert command.count("/workspace/sandboxes/abc/true.jpg") == 1
         assert "watermark_wf-1" in command
 
     def test_invoke_file_ref_with_spaces(self, mock_bash_tool: MagicMock) -> None:
@@ -301,6 +304,33 @@ class TestWrapperInvoke:
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
         assert "[File:" not in command
         assert "/workspace/my file.png" in command
+
+    def test_invoke_file_ref_relative_resolved(self, mock_bash_tool: MagicMock) -> None:
+        """Relative path [File: true.jpg] → /workspace/sandboxes/test-sandbox/true.jpg."""
+        entity = _make_tool_entity("wm")
+        real_tool = MagicMock()
+        real_tool.entity = entity
+        real_tool.runtime = MagicMock()
+        real_tool.runtime.runtime_parameters = {}
+
+        ref = ToolReference(
+            uuid="wm",
+            type=ToolProviderType.MCP,
+            provider="s",
+            tool_name="wm",
+        )
+
+        wrapper = SandboxNativeToolWrapper(
+            tool_ref=ref,
+            real_tool=real_tool,
+            bash_tool=mock_bash_tool,
+        )
+
+        list(wrapper._invoke("u", {"image_file": "[File: true.jpg]", "text": "123"}))
+
+        command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
+        assert "[File:" not in command
+        assert "/workspace/sandboxes/test-sandbox/true.jpg" in command
 
     def test_invoke_plain_path_preserved(self, mock_bash_tool: MagicMock) -> None:
         """Plain file path (no [File:] wrapper) is passed through unchanged."""
