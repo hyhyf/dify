@@ -188,20 +188,20 @@ class SandboxNativeToolWrapper(Tool):
         _file_ref_pattern = re.compile(r"^\[File:\s*(.+?)\]$")
 
         def _clean_value(val: object) -> str:
-            """Strip [File: ...] notation and resolve to absolute sandbox path."""
+            """Strip [File: ...] notation, resolve path, and add @ prefix for dify-cli."""
             if not isinstance(val, str):
                 return str(val)
             m = _file_ref_pattern.match(val)
             if m:
                 raw_path = m.group(1).strip()
-            else:
-                raw_path = val
-            # Resolve relative paths against sandbox working directory
-            if not os.path.isabs(raw_path):
-                raw_path = os.path.normpath(
-                    os.path.join(self._bash_tool._sandbox.get_working_path(), raw_path)
-                )
-            return raw_path
+                # Resolve relative paths against sandbox working directory
+                if not os.path.isabs(raw_path):
+                    raw_path = os.path.normpath(
+                        os.path.join(self._bash_tool._sandbox.get_working_path(), raw_path)
+                    )
+                # @ prefix tells dify-cli this is a file to upload
+                return f"@{raw_path}"
+            return val
 
         # Build dify-cli command from native JSON parameters
         tool_name = self.entity.identity.name

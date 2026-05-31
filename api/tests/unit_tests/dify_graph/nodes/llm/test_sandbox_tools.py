@@ -273,8 +273,8 @@ class TestWrapperInvoke:
 
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
         assert "[File:" not in command
-        # Absolute path should be preserved as-is (not joined with working dir)
-        assert command.count("/workspace/sandboxes/abc/true.jpg") == 1
+        # Absolute path with @ prefix for dify-cli file detection
+        assert "@/workspace/sandboxes/abc/true.jpg" in command
         assert "watermark_wf-1" in command
 
     def test_invoke_file_ref_with_spaces(self, mock_bash_tool: MagicMock) -> None:
@@ -303,7 +303,7 @@ class TestWrapperInvoke:
 
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
         assert "[File:" not in command
-        assert "/workspace/my file.png" in command
+        assert "@/workspace/my file.png" in command
 
     def test_invoke_file_ref_relative_resolved(self, mock_bash_tool: MagicMock) -> None:
         """Relative path [File: true.jpg] → /workspace/sandboxes/test-sandbox/true.jpg."""
@@ -330,7 +330,7 @@ class TestWrapperInvoke:
 
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
         assert "[File:" not in command
-        assert "/workspace/sandboxes/test-sandbox/true.jpg" in command
+        assert "@/workspace/sandboxes/test-sandbox/true.jpg" in command
 
     def test_invoke_plain_path_preserved(self, mock_bash_tool: MagicMock) -> None:
         """Plain file path (no [File:] wrapper) is passed through unchanged."""
@@ -356,6 +356,7 @@ class TestWrapperInvoke:
         list(wrapper._invoke("u", {"image_file": "/workspace/photo.jpg"}))
 
         command = mock_bash_tool._invoke.call_args.kwargs["tool_parameters"]["bash"]
+        # Plain paths (no [File:] wrapper) are passed through as-is
         assert "/workspace/photo.jpg" in command
 
 
