@@ -210,8 +210,7 @@ class SandboxNativeToolWrapper(Tool):
 
         uuid_part = ""
         if self._tool_ref and self._tool_ref.uuid:
-            # dify-cli GetReferenceSymlinkName uses ID[:8] (short UUID)
-            uuid_part = f"_{self._tool_ref.uuid[:8]}"
+            uuid_part = f"_{self._tool_ref.uuid}"
         elif self._tool_ref:
             uuid_part = f"_{self._tool_ref.provider}.{self._tool_ref.tool_name}"
 
