@@ -31,10 +31,11 @@ def _transform_file_url_params(tool_parameters: dict[str, Any], parameters: list
             continue
         if isinstance(value, str) and not value.startswith("{"):
             # UUID-like string → tool_file_id from dify-cli upload
+            # tool_file transfer method uses upload_file_id/related_id
             tool_parameters[key] = {
-                "transfer_method": "tool_file",
-                "upload_id": value,
-                "related_id": value,
+                "transfer_method": "local_file",
+                "upload_file_id": value,
+                "url": "",
             }
         elif isinstance(value, str) and value.startswith("http"):
             # HTTP URL → remote_url
