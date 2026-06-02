@@ -3,11 +3,41 @@ from typing import Any
 
 from core.callback_handler.workflow_tool_callback_handler import DifyWorkflowCallbackHandler
 from core.plugin.backwards_invocation.base import BaseBackwardsInvocation
-from core.tools.entities.tool_entities import ToolInvokeMessage, ToolProviderType
+from core.tools.entities.tool_entities import ToolInvokeMessage, ToolParameter, ToolProviderType
 from core.tools.signature import sign_tool_file
 from core.tools.tool_engine import ToolEngine
 from core.tools.tool_manager import ToolManager
 from core.tools.utils.message_transformer import ToolFileMessageTransformer
+
+FILE_PARAM_TYPES = {
+    ToolParameter.ToolParameterType.FILE,
+    ToolParameter.ToolParameterType.FILES,
+    ToolParameter.ToolParameterType.SYSTEM_FILES,
+}
+
+
+def _transform_file_url_params(tool_parameters: dict[str, Any], parameters: list[ToolParameter]) -> None:
+    """Convert raw file URLs (from dify-cli upload) into the standard file reference format.
+
+    When dify-cli uploads a file, it replaces the parameter value with a signed URL.
+    Plugin tools expect file parameters in the standard format with transfer_method.
+    """
+    file_param_names = {p.name for p in parameters if p.type in FILE_PARAM_TYPES}
+    if not file_param_names:
+        return
+
+    for key, value in list(tool_parameters.items()):
+        if key not in file_param_names:
+            continue
+        if isinstance(value, str) and value.startswith("http"):
+            tool_parameters[key] = {"transfer_method": "remote_url", "url": value}
+        elif isinstance(value, list):
+            tool_parameters[key] = [
+                {"transfer_method": "remote_url", "url": v}
+                if isinstance(v, str) and v.startswith("http")
+                else v
+                for v in value
+            ]
 
 
 class PluginToolBackwardsInvocation(BaseBackwardsInvocation):
@@ -34,6 +64,10 @@ class PluginToolBackwardsInvocation(BaseBackwardsInvocation):
             tool_runtime = ToolManager.get_tool_runtime_from_plugin(
                 tool_type, tenant_id, provider, tool_name, tool_parameters, credential_id
             )
+
+            # Transform file URL parameters (from dify-cli upload) into proper file format
+            _transform_file_url_params(tool_parameters, tool_runtime.entity.parameters)
+
             response = ToolEngine.generic_invoke(
                 tool_runtime, tool_parameters, user_id, DifyWorkflowCallbackHandler(), workflow_call_depth=1
             )
