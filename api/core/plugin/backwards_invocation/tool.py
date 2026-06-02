@@ -17,10 +17,10 @@ FILE_PARAM_TYPES = {
 
 
 def _transform_file_url_params(tool_parameters: dict[str, Any], parameters: list[ToolParameter]) -> None:
-    """Convert raw file URLs (from dify-cli upload) into the standard file reference format.
+    """Convert file parameter values (from dify-cli upload) to standard Dify file format.
 
-    When dify-cli uploads a file, it replaces the parameter value with a signed URL.
-    Plugin tools expect file parameters in the standard format with transfer_method.
+    When dify-cli uploads a file, it returns the ToolFile ID. Plugin tools expect
+    file parameters in the standard format with transfer_method.
     """
     file_param_names = {p.name for p in parameters if p.type in FILE_PARAM_TYPES}
     if not file_param_names:
@@ -29,11 +29,21 @@ def _transform_file_url_params(tool_parameters: dict[str, Any], parameters: list
     for key, value in list(tool_parameters.items()):
         if key not in file_param_names:
             continue
-        if isinstance(value, str) and value.startswith("http"):
+        if isinstance(value, str) and not value.startswith("{"):
+            # UUID-like string → tool_file_id from dify-cli upload
+            tool_parameters[key] = {
+                "transfer_method": "tool_file",
+                "upload_id": value,
+                "related_id": value,
+            }
+        elif isinstance(value, str) and value.startswith("http"):
+            # HTTP URL → remote_url
             tool_parameters[key] = {"transfer_method": "remote_url", "url": value}
         elif isinstance(value, list):
             tool_parameters[key] = [
-                {"transfer_method": "remote_url", "url": v}
+                {"transfer_method": "tool_file", "upload_id": v}
+                if isinstance(v, str) and not v.startswith("{") and not v.startswith("http")
+                else {"transfer_method": "remote_url", "url": v}
                 if isinstance(v, str) and v.startswith("http")
                 else v
                 for v in value
