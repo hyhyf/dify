@@ -22,9 +22,9 @@ COMMAND_TIMEOUT_SECONDS = 60 * 60 * 2  # 2 hours, can be adjusted based on expec
 
 # Output truncation settings to avoid overwhelming model context
 # 8000 chars ≈ 2000-2700 tokens, safe for models with 8K+ context
-MAX_OUTPUT_LENGTH = 8000
-TRUNCATE_HEAD_LENGTH = 2500  # Keep beginning for context
-TRUNCATE_TAIL_LENGTH = 2500  # Keep end for results/errors
+MAX_OUTPUT_LENGTH = 15000
+TRUNCATE_HEAD_LENGTH = 7500  # Keep beginning for context
+TRUNCATE_TAIL_LENGTH = 7500  # Keep end for results/errors
 
 
 def _truncate_output(output: str, name: str = "output") -> str:
