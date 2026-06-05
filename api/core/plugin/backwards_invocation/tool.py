@@ -30,10 +30,8 @@ def _transform_file_url_params(tool_parameters: dict[str, Any], parameters: list
         if key not in file_param_names:
             continue
         if isinstance(value, str) and value.startswith("http"):
-            # HTTP URL → remote_url transfer method
             tool_parameters[key] = {"transfer_method": "remote_url", "url": value}
         elif isinstance(value, str) and not value.startswith("{"):
-            # UUID-like string → tool_file_id
             tool_parameters[key] = {
                 "transfer_method": "local_file",
                 "upload_file_id": value,
