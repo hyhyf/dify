@@ -220,7 +220,10 @@ def test_sanitize_default_value_and_type_detection():
         ApiBasedToolSchemaParser._get_tool_parameter_type({"type": "array", "items": {"type": "string"}})
         == ToolParameter.ToolParameterType.ARRAY
     )
-    assert ApiBasedToolSchemaParser._get_tool_parameter_type({"type": "object"}) is None
+    assert (
+        ApiBasedToolSchemaParser._get_tool_parameter_type({"type": "object"})
+        == ToolParameter.ToolParameterType.OBJECT
+    )
 
 
 def test_parse_openapi_to_tool_bundle_server_env_and_refs(app):

@@ -103,6 +103,19 @@ class ApiBasedToolSchemaParser:
                     if typ:
                         tool_parameter.type = typ
 
+                    # preserve nested schema for object and array types
+                    # (strip 'default' to avoid leaking it into LLM-facing function schema)
+                    if tool_parameter.type in (
+                        ToolParameter.ToolParameterType.OBJECT,
+                        ToolParameter.ToolParameterType.ARRAY,
+                    ):
+                        schema = {
+                            k: v
+                            for k, v in parameter.get("schema", {}).items()
+                            if k != "default"
+                        }
+                        tool_parameter.input_schema = schema
+
                     parameters.append(tool_parameter)
             # create tool bundle
             # check if there is a request body
@@ -176,6 +189,17 @@ class ApiBasedToolSchemaParser:
                                 typ = ApiBasedToolSchemaParser._get_tool_parameter_type(property)
                                 if typ:
                                     tool.type = typ
+
+                                # preserve nested schema for object and array types
+                                if tool.type in (
+                                    ToolParameter.ToolParameterType.OBJECT,
+                                    ToolParameter.ToolParameterType.ARRAY,
+                                ):
+                                    tool.input_schema = {
+                                        k: v
+                                        for k, v in property.items()
+                                        if k != "default"
+                                    }
 
                                 parameters.append(tool)
 
@@ -260,6 +284,8 @@ class ApiBasedToolSchemaParser:
             else:
                 # For regular arrays, return ARRAY type instead of None
                 return ToolParameter.ToolParameterType.ARRAY
+        elif typ == "object":
+            return ToolParameter.ToolParameterType.OBJECT
         else:
             return None
 
