@@ -13,6 +13,9 @@ from pathlib import PurePosixPath
 from typing import Any
 from uuid import uuid4
 
+from opentelemetry.trace import Span, SpanKind, Status, StatusCode, get_tracer
+
+from configs import dify_config
 from core.entities.provider_entities import BasicProviderConfig
 from core.virtual_environment.__base.entities import (
     Arch,
@@ -78,6 +81,7 @@ class SSHSandboxEnvironment(VirtualEnvironment):
         self._commands: dict[str, CommandStatus] = {}
         self._command_channels: dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._span_store: dict[str, Span] = {}
         super().__init__(tenant_id=tenant_id, options=options, environments=environments, user_id=user_id)
 
     @classmethod
@@ -137,6 +141,7 @@ class SSHSandboxEnvironment(VirtualEnvironment):
         with contextlib.suppress(Exception):
             with self._client() as client:
                 self._run_command(client, f"rm -rf {shlex.quote(working_path)}")
+        self._drain_span_store()
 
     def execute_command(
         self,
@@ -162,15 +167,31 @@ class SSHSandboxEnvironment(VirtualEnvironment):
         stdout_transport = QueueTransportReadCloser()
         stderr_transport = QueueTransportReadCloser()
 
+        span = self._create_command_span(pid, execution_command) if dify_config.ENABLE_OTEL else None
+
         with self._lock:
             self._commands[pid] = CommandStatus(status=CommandStatus.Status.RUNNING, exit_code=None)
             self._command_channels[pid] = channel
+            if span is not None:
+                self._span_store[pid] = span
 
-        threading.Thread(
-            target=self._consume_channel_output,
-            args=(pid, channel, stdout_transport, stderr_transport, COMMAND_EXECUTION_TIMEOUT_SECONDS),
-            daemon=True,
-        ).start()
+        try:
+            threading.Thread(
+                target=self._consume_channel_output,
+                args=(pid, channel, stdout_transport, stderr_transport, COMMAND_EXECUTION_TIMEOUT_SECONDS),
+                daemon=True,
+            ).start()
+        except Exception:
+            if span is not None:
+                with self._lock:
+                    self._span_store.pop(pid, None)
+                try:
+                    span.record_exception(Exception("Failed to start consume thread"))
+                    span.set_status(Status(StatusCode.ERROR, "thread start failed"))
+                    span.end()
+                except Exception:
+                    logger.debug("Failed to clean up span after thread start failure", exc_info=True)
+            raise
 
         return pid, stdin_transport, stdout_transport, stderr_transport
 
@@ -380,6 +401,23 @@ class SSHSandboxEnvironment(VirtualEnvironment):
 
     @classmethod
     def _run_command(cls, client: Any, command: str) -> bytes:
+        if not dify_config.ENABLE_OTEL:
+            return cls._run_command_impl(client, command)
+
+        tracer = get_tracer(__name__)
+        with tracer.start_as_current_span(f"{cls.__name__}._run_command", kind=SpanKind.INTERNAL) as span:
+            span.set_attribute("sandbox.command", command)
+            try:
+                result = cls._run_command_impl(client, command)
+                span.set_status(Status(StatusCode.OK))
+                return result
+            except Exception as exc:
+                span.record_exception(exc)
+                span.set_status(Status(StatusCode.ERROR, str(exc)))
+                raise
+
+    @classmethod
+    def _run_command_impl(cls, client: Any, command: str) -> bytes:
         _, stdout, stderr = client.exec_command(command, timeout=cls._SSH_OPERATION_TIMEOUT_SECONDS)
         stdout.channel.settimeout(cls._SSH_OPERATION_TIMEOUT_SECONDS)
 
@@ -446,6 +484,8 @@ class SSHSandboxEnvironment(VirtualEnvironment):
                 self._command_channels.pop(pid, None)
                 self._commands[pid] = CommandStatus(status=CommandStatus.Status.COMPLETED, exit_code=exit_code)
 
+            self._finish_command_span(pid, exit_code)
+
     def _set_sftp_operation_timeout(self, sftp: Any) -> None:
         with contextlib.suppress(Exception):
             sftp.get_channel().settimeout(self._SSH_OPERATION_TIMEOUT_SECONDS)
@@ -497,3 +537,44 @@ class SSHSandboxEnvironment(VirtualEnvironment):
                 attrs = sftp.stat(current_path)
                 if not stat.S_ISDIR(attrs.st_mode):
                     raise OSError(f"Failed to create directory: {current_path}")
+
+    def _create_command_span(self, pid: str, execution_command: str) -> Span:
+        tracer = get_tracer(__name__)
+        host = self.options.get(self.OptionsKey.SSH_HOST, self._DEFAULT_SSH_HOST)
+        span = tracer.start_span(
+            "SSHSandboxEnvironment.execute_command",
+            kind=SpanKind.INTERNAL,
+        )
+        span.set_attribute("sandbox.command", execution_command)
+        span.set_attribute("sandbox.pid", pid)
+        span.set_attribute("sandbox.type", "ssh")
+        span.set_attribute("sandbox.host", str(host))
+        span.set_attribute("sandbox.tenant_id", self.tenant_id)
+        return span
+
+    def _finish_command_span(self, pid: str, exit_code: int | None) -> None:
+        with self._lock:
+            span = self._span_store.pop(pid, None)
+        if span is None:
+            return
+        try:
+            span.set_attribute("sandbox.exit_code", exit_code or 0)
+            if exit_code and exit_code != 0:
+                span.set_status(Status(StatusCode.ERROR, f"exit_code={exit_code}"))
+            else:
+                span.set_status(Status(StatusCode.OK))
+            span.end()
+        except Exception:
+            logger.debug("Failed to finish OTel span for pid=%s", pid, exc_info=True)
+
+    def _drain_span_store(self) -> None:
+        with self._lock:
+            spans = list(self._span_store.items())
+            self._span_store.clear()
+        for pid, span in spans:
+            try:
+                span.set_attribute("sandbox.exit_code", -1)
+                span.set_status(Status(StatusCode.ERROR, "environment released with pending commands"))
+                span.end()
+            except Exception:
+                logger.debug("Failed to drain OTel span for pid=%s", pid, exc_info=True)
