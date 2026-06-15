@@ -80,6 +80,7 @@ class PhoenixConfig(BaseTracingConfig):
 
     api_key: str | None = None
     project: str | None = None
+    instance_id: str | None = None
     endpoint: str = "https://app.phoenix.arize.com"
 
     @field_validator("project")

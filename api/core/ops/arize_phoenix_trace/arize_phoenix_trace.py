@@ -83,6 +83,7 @@ def setup_tracer(arize_phoenix_config: ArizeConfig | PhoenixConfig) -> tuple[tra
         attributes = {
             "openinference.project.name": arize_phoenix_config.project or "",
             "model_id": arize_phoenix_config.project or "",
+            "instance_id": arize_phoenix_config.instance_id or "",
         }
         resource = Resource(attributes=attributes)
         provider = trace_sdk.TracerProvider(resource=resource)
@@ -324,6 +325,7 @@ class ArizePhoenixDataTrace(BaseTraceInstance):
                         SpanAttributes.OUTPUT_MIME_TYPE: OpenInferenceMimeTypeValues.JSON.value,
                         SpanAttributes.METADATA: safe_json_dumps(node_metadata),
                         SpanAttributes.SESSION_ID: trace_info.conversation_id or "",
+                        "process_data.value": safe_json_dumps(process_data),
                     },
                     start_time=datetime_to_nanos(created_at),
                     context=workflow_span_context,
