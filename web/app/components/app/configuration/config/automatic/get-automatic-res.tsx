@@ -23,15 +23,17 @@ import Button from '@/app/components/base/button'
 import Confirm from '@/app/components/base/confirm'
 import { Generator } from '@/app/components/base/icons/src/vender/other'
 import Loading from '@/app/components/base/loading'
-
 import Modal from '@/app/components/base/modal'
-import Toast from '@/app/components/base/toast'
+
+import { toast } from '@/app/components/base/ui/toast'
 import { ModelTypeEnum } from '@/app/components/header/account-setting/model-provider-page/declarations'
 
 import { useModelListAndDefaultModelAndCurrentProviderAndModel } from '@/app/components/header/account-setting/model-provider-page/hooks'
 import ModelParameterModal from '@/app/components/header/account-setting/model-provider-page/model-parameter-modal'
+import { STORAGE_KEYS } from '@/config/storage-keys'
 import { generateBasicAppFirstTimeRule, generateRule } from '@/service/debug'
 import { useGenerateRuleTemplate } from '@/service/use-apps'
+import { storage } from '@/utils/storage'
 import IdeaOutput from './idea-output'
 import InstructionEditorInBasic from './instruction-editor'
 import InstructionEditorInWorkflow from './instruction-editor-in-workflow'
@@ -83,9 +85,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
   onFinished,
 }) => {
   const { t } = useTranslation()
-  const localModel = localStorage.getItem('auto-gen-model')
-    ? JSON.parse(localStorage.getItem('auto-gen-model') as string) as Model
-    : null
+  const localModel = storage.get<Model>(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL)
   const [model, setModel] = React.useState<Model>(localModel || {
     name: '',
     provider: '',
@@ -134,7 +134,9 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
     },
   ] as const
 
-  const [instructionFromSessionStorage, setInstruction] = useSessionStorageState<string>(`improve-instruction-${flowId}${isBasicMode ? '' : `-${nodeId}${editorId ? `-${editorId}` : ''}`}`)
+  const [instructionFromSessionStorage, setInstruction] = useSessionStorageState<string>(
+    `${STORAGE_KEYS.SESSION.GENERATOR.INSTRUCTION_PREFIX}${flowId}${isBasicMode ? '' : `-${nodeId}${editorId ? `-${editorId}` : ''}`}`,
+  )
   const instruction = instructionFromSessionStorage || ''
   const [ideaOutput, setIdeaOutput] = useState<string>('')
 
@@ -159,13 +161,10 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
 
   const isValid = () => {
     if (instruction.trim() === '') {
-      Toast.notify({
-        type: 'error',
-        message: t('errorMsg.fieldRequired', {
-          ns: 'common',
-          field: t('generate.instruction', { ns: 'appDebug' }),
-        }),
-      })
+      toast.error(t('errorMsg.fieldRequired', {
+        ns: 'common',
+        field: t('generate.instruction', { ns: 'appDebug' }),
+      }))
       return false
     }
     return true
@@ -178,9 +177,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
 
   useEffect(() => {
     if (defaultModel) {
-      const localModel = localStorage.getItem('auto-gen-model')
-        ? JSON.parse(localStorage.getItem('auto-gen-model') || '')
-        : null
+      const localModel = storage.get<Model>(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL)
       if (localModel) {
         setModel(localModel)
       }
@@ -209,7 +206,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
       mode: newValue.mode as ModelModeType,
     }
     setModel(newModel)
-    localStorage.setItem('auto-gen-model', JSON.stringify(newModel))
+    storage.set(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL, newModel)
   }, [model, setModel])
 
   const handleCompletionParamsChange = useCallback((newParams: FormValue) => {
@@ -218,7 +215,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
       completion_params: newParams as CompletionParams,
     }
     setModel(newModel)
-    localStorage.setItem('auto-gen-model', JSON.stringify(newModel))
+    storage.set(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL, newModel)
   }, [model, setModel])
 
   const onGenerate = async () => {
@@ -242,10 +239,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
         } as GenRes
         if (error) {
           hasError = true
-          Toast.notify({
-            type: 'error',
-            message: error,
-          })
+          toast.error(error)
         }
       }
       else {
@@ -260,10 +254,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
         apiRes = res
         if (error) {
           hasError = true
-          Toast.notify({
-            type: 'error',
-            message: error,
-          })
+          toast.error(error)
         }
       }
       if (!hasError)
@@ -298,7 +289,6 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
           <div>
             <ModelParameterModal
               popupClassName="!w-[520px]"
-              portalToFollowElemContentClassName="z-[1000]"
               isAdvancedMode={true}
               provider={model.provider}
               completionParams={model.completion_params}
@@ -336,7 +326,7 @@ const GetAutomaticRes: FC<IGetAutomaticResProps> = ({
           {/* inputs */}
           <div className="mt-4">
             <div>
-              <div className="system-sm-semibold-uppercase mb-1.5 text-text-secondary">{t('generate.instruction', { ns: 'appDebug' })}</div>
+              <div className="mb-1.5 text-text-secondary system-sm-semibold-uppercase">{t('generate.instruction', { ns: 'appDebug' })}</div>
               {isBasicMode
                 ? (
                     <InstructionEditorInBasic

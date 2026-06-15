@@ -4,10 +4,12 @@ from typing import Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from core.model_runtime.entities.llm_entities import LLMResult, LLMUsage
+from core.app.entities.agent_strategy import AgentStrategyInfo
 from core.rag.entities.citation_metadata import RetrievalSourceMetadata
-from core.workflow.entities import AgentNodeStrategyInit
-from core.workflow.enums import WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
+from dify_graph.entities.workflow_start_reason import WorkflowStartReason
+from dify_graph.enums import WorkflowExecutionStatus, WorkflowNodeExecutionMetadataKey, WorkflowNodeExecutionStatus
+from dify_graph.model_runtime.entities.llm_entities import LLMResult, LLMUsage
+from dify_graph.nodes.human_input.entities import FormInput, UserAction
 
 
 class AnnotationReplyAccount(BaseModel):
@@ -69,6 +71,7 @@ class StreamEvent(StrEnum):
     AGENT_THOUGHT = "agent_thought"
     AGENT_MESSAGE = "agent_message"
     WORKFLOW_STARTED = "workflow_started"
+    WORKFLOW_PAUSED = "workflow_paused"
     WORKFLOW_FINISHED = "workflow_finished"
     NODE_STARTED = "node_started"
     NODE_FINISHED = "node_finished"
@@ -82,6 +85,9 @@ class StreamEvent(StrEnum):
     TEXT_CHUNK = "text_chunk"
     TEXT_REPLACE = "text_replace"
     AGENT_LOG = "agent_log"
+    HUMAN_INPUT_REQUIRED = "human_input_required"
+    HUMAN_INPUT_FORM_FILLED = "human_input_form_filled"
+    HUMAN_INPUT_FORM_TIMEOUT = "human_input_form_timeout"
 
 
 class StreamResponse(BaseModel):
@@ -112,6 +118,49 @@ class MessageStreamResponse(StreamResponse):
     id: str
     answer: str
     from_variable_selector: list[str] | None = None
+    node_id: str | None = None
+    """workflow node id that produced this chunk"""
+
+    # Extended fields for Agent/Tool streaming (imported at runtime to avoid circular import)
+    chunk_type: str | None = None
+    """type of the chunk: text, tool_call, tool_result, thought, model_start, model_end"""
+
+    # Tool call fields (when chunk_type == "tool_call")
+    tool_call_id: str | None = None
+    """unique identifier for this tool call"""
+    tool_name: str | None = None
+    """name of the tool being called"""
+    tool_arguments: str | None = None
+    """accumulated tool arguments JSON"""
+
+    # Tool result fields (when chunk_type == "tool_result")
+    tool_files: list[str] | None = None
+    """file IDs produced by tool"""
+    tool_error: str | None = None
+    """error message if tool failed"""
+    tool_elapsed_time: float | None = None
+    """elapsed time spent executing the tool"""
+    tool_icon: str | dict | None = None
+    """icon of the tool"""
+    tool_icon_dark: str | dict | None = None
+    """dark theme icon of the tool"""
+
+    # Model identity fields (when chunk_type == "model_start")
+    model_provider: str | None = None
+    model_name: str | None = None
+    model_icon: str | dict | None = None
+    model_icon_dark: str | dict | None = None
+    # Model metrics fields (when chunk_type == "model_end")
+    model_usage: dict | None = None
+    model_duration: float | None = None
+
+    def model_dump(self, *args, **kwargs) -> dict[str, object]:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(*args, **kwargs)
+
+    def model_dump_json(self, *args, **kwargs) -> str:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump_json(*args, **kwargs)
 
 
 class MessageAudioStreamResponse(StreamResponse):
@@ -205,6 +254,8 @@ class WorkflowStartStreamResponse(StreamResponse):
         workflow_id: str
         inputs: Mapping[str, Any]
         created_at: int
+        # Always present; mirrors QueueWorkflowStartedEvent.reason for SSE clients.
+        reason: WorkflowStartReason = WorkflowStartReason.INITIAL
 
     event: StreamEvent = StreamEvent.WORKFLOW_STARTED
     workflow_run_id: str
@@ -223,7 +274,7 @@ class WorkflowFinishStreamResponse(StreamResponse):
 
         id: str
         workflow_id: str
-        status: str
+        status: WorkflowExecutionStatus
         outputs: Mapping[str, Any] | None = None
         error: str | None = None
         elapsed_time: float
@@ -231,11 +282,90 @@ class WorkflowFinishStreamResponse(StreamResponse):
         total_steps: int
         created_by: Mapping[str, object] = Field(default_factory=dict)
         created_at: int
-        finished_at: int
+        finished_at: int | None
         exceptions_count: int | None = 0
         files: Sequence[Mapping[str, Any]] | None = []
 
     event: StreamEvent = StreamEvent.WORKFLOW_FINISHED
+    workflow_run_id: str
+    data: Data
+
+
+class WorkflowPauseStreamResponse(StreamResponse):
+    """
+    WorkflowPauseStreamResponse entity
+    """
+
+    class Data(BaseModel):
+        """
+        Data entity
+        """
+
+        workflow_run_id: str
+        paused_nodes: Sequence[str] = Field(default_factory=list)
+        outputs: Mapping[str, Any] = Field(default_factory=dict)
+        reasons: Sequence[Mapping[str, Any]] = Field(default_factory=list)
+        status: WorkflowExecutionStatus
+        created_at: int
+        elapsed_time: float
+        total_tokens: int
+        total_steps: int
+
+    event: StreamEvent = StreamEvent.WORKFLOW_PAUSED
+    workflow_run_id: str
+    data: Data
+
+
+class HumanInputRequiredResponse(StreamResponse):
+    class Data(BaseModel):
+        """
+        Data entity
+        """
+
+        form_id: str
+        node_id: str
+        node_title: str
+        form_content: str
+        inputs: Sequence[FormInput] = Field(default_factory=list)
+        actions: Sequence[UserAction] = Field(default_factory=list)
+        display_in_ui: bool = False
+        form_token: str | None = None
+        resolved_default_values: Mapping[str, Any] = Field(default_factory=dict)
+        expiration_time: int = Field(..., description="Unix timestamp in seconds")
+
+    event: StreamEvent = StreamEvent.HUMAN_INPUT_REQUIRED
+    workflow_run_id: str
+    data: Data
+
+
+class HumanInputFormFilledResponse(StreamResponse):
+    class Data(BaseModel):
+        """
+        Data entity
+        """
+
+        node_id: str
+        node_title: str
+        rendered_content: str
+        action_id: str
+        action_text: str
+
+    event: StreamEvent = StreamEvent.HUMAN_INPUT_FORM_FILLED
+    workflow_run_id: str
+    data: Data
+
+
+class HumanInputFormTimeoutResponse(StreamResponse):
+    class Data(BaseModel):
+        """
+        Data entity
+        """
+
+        node_id: str
+        node_title: str
+        expiration_time: int
+
+    event: StreamEvent = StreamEvent.HUMAN_INPUT_FORM_TIMEOUT
     workflow_run_id: str
     data: Data
 
@@ -262,7 +392,8 @@ class NodeStartStreamResponse(StreamResponse):
         extras: dict[str, object] = Field(default_factory=dict)
         iteration_id: str | None = None
         loop_id: str | None = None
-        agent_strategy: AgentNodeStrategyInit | None = None
+        parent_node_id: str | None = None
+        agent_strategy: AgentStrategyInfo | None = None
 
     event: StreamEvent = StreamEvent.NODE_STARTED
     workflow_run_id: str
@@ -285,6 +416,7 @@ class NodeStartStreamResponse(StreamResponse):
                 "extras": {},
                 "iteration_id": self.data.iteration_id,
                 "loop_id": self.data.loop_id,
+                "parent_node_id": self.data.parent_node_id,
             },
         }
 
@@ -311,7 +443,7 @@ class NodeFinishStreamResponse(StreamResponse):
         process_data_truncated: bool = False
         outputs: Mapping[str, Any] | None = None
         outputs_truncated: bool = True
-        status: str
+        status: WorkflowNodeExecutionStatus
         error: str | None = None
         elapsed_time: float
         execution_metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] | None = None
@@ -320,6 +452,7 @@ class NodeFinishStreamResponse(StreamResponse):
         files: Sequence[Mapping[str, Any]] | None = []
         iteration_id: str | None = None
         loop_id: str | None = None
+        parent_node_id: str | None = None
 
     event: StreamEvent = StreamEvent.NODE_FINISHED
     workflow_run_id: str
@@ -349,6 +482,7 @@ class NodeFinishStreamResponse(StreamResponse):
                 "files": [],
                 "iteration_id": self.data.iteration_id,
                 "loop_id": self.data.loop_id,
+                "parent_node_id": self.data.parent_node_id,
             },
         }
 
@@ -375,7 +509,7 @@ class NodeRetryStreamResponse(StreamResponse):
         process_data_truncated: bool = False
         outputs: Mapping[str, Any] | None = None
         outputs_truncated: bool = False
-        status: str
+        status: WorkflowNodeExecutionStatus
         error: str | None = None
         elapsed_time: float
         execution_metadata: Mapping[WorkflowNodeExecutionMetadataKey, Any] | None = None
@@ -384,6 +518,7 @@ class NodeRetryStreamResponse(StreamResponse):
         files: Sequence[Mapping[str, Any]] | None = []
         iteration_id: str | None = None
         loop_id: str | None = None
+        parent_node_id: str | None = None
         retry_index: int = 0
 
     event: StreamEvent = StreamEvent.NODE_RETRY
@@ -414,6 +549,7 @@ class NodeRetryStreamResponse(StreamResponse):
                 "files": [],
                 "iteration_id": self.data.iteration_id,
                 "loop_id": self.data.loop_id,
+                "parent_node_id": self.data.parent_node_id,
                 "retry_index": self.data.retry_index,
             },
         }
@@ -582,6 +718,19 @@ class LoopNodeCompletedStreamResponse(StreamResponse):
     data: Data
 
 
+class ChunkType(StrEnum):
+    """Stream chunk type for LLM-related events."""
+
+    TEXT = "text"  # Normal text streaming
+    TOOL_CALL = "tool_call"  # Tool call arguments streaming
+    TOOL_RESULT = "tool_result"  # Tool execution result
+    THOUGHT = "thought"  # Agent thinking process (ReAct)
+    THOUGHT_START = "thought_start"  # Agent thought start
+    THOUGHT_END = "thought_end"  # Agent thought end
+    MODEL_START = "model_start"  # Model turn started with identity info
+    MODEL_END = "model_end"  # Model turn completed with metrics
+
+
 class TextChunkStreamResponse(StreamResponse):
     """
     TextChunkStreamResponse entity
@@ -594,6 +743,47 @@ class TextChunkStreamResponse(StreamResponse):
 
         text: str
         from_variable_selector: list[str] | None = None
+        node_id: str | None = None
+        """workflow node id that produced this chunk"""
+
+        # Extended fields for Agent/Tool streaming
+        chunk_type: ChunkType = ChunkType.TEXT
+        """type of the chunk"""
+
+        # Tool call fields (when chunk_type == TOOL_CALL)
+        tool_call_id: str | None = None
+        """unique identifier for this tool call"""
+        tool_name: str | None = None
+        """name of the tool being called"""
+        tool_arguments: str | None = None
+        """accumulated tool arguments JSON"""
+
+        # Tool result fields (when chunk_type == TOOL_RESULT)
+        tool_files: list[str] | None = None
+        """file IDs produced by tool"""
+        tool_error: str | None = None
+        """error message if tool failed"""
+
+        # Tool elapsed time fields (when chunk_type == TOOL_RESULT)
+        tool_elapsed_time: float | None = None
+        """elapsed time spent executing the tool"""
+
+        # Model identity fields (when chunk_type == MODEL_START)
+        model_provider: str | None = None
+        model_name: str | None = None
+        model_icon: str | dict | None = None
+        model_icon_dark: str | dict | None = None
+        # Model metrics fields (when chunk_type == MODEL_END)
+        model_usage: dict | None = None
+        model_duration: float | None = None
+
+        def model_dump(self, *args, **kwargs) -> dict[str, object]:
+            kwargs.setdefault("exclude_none", True)
+            return super().model_dump(*args, **kwargs)
+
+        def model_dump_json(self, *args, **kwargs) -> str:
+            kwargs.setdefault("exclude_none", True)
+            return super().model_dump_json(*args, **kwargs)
 
     event: StreamEvent = StreamEvent.TEXT_CHUNK
     data: Data
@@ -719,14 +909,14 @@ class WorkflowAppBlockingResponse(AppBlockingResponse):
 
         id: str
         workflow_id: str
-        status: str
+        status: WorkflowExecutionStatus
         outputs: Mapping[str, Any] | None = None
         error: str | None = None
         elapsed_time: float
         total_tokens: int
         total_steps: int
         created_at: int
-        finished_at: int
+        finished_at: int | None
 
     workflow_run_id: str
     data: Data
@@ -743,7 +933,7 @@ class AgentLogStreamResponse(StreamResponse):
         """
 
         node_execution_id: str
-        id: str
+        message_id: str
         label: str
         parent_id: str | None = None
         error: str | None = None

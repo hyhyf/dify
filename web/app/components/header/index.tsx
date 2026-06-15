@@ -1,5 +1,4 @@
 'use client'
-import Link from 'next/link'
 import { useCallback } from 'react'
 import DifyLogo from '@/app/components/base/logo/dify-logo'
 import WorkplaceSelector from '@/app/components/header/account-dropdown/workplace-selector'
@@ -8,8 +7,9 @@ import { useAppContext } from '@/context/app-context'
 import { useGlobalPublicStore } from '@/context/global-public-context'
 import { useModalContext } from '@/context/modal-context'
 import { useProviderContext } from '@/context/provider-context'
-import { WorkspaceProvider } from '@/context/workspace-context'
+import { WorkspaceProvider } from '@/context/workspace-context-provider'
 import useBreakpoints, { MediaType } from '@/hooks/use-breakpoints'
+import Link from '@/next/link'
 import { Plan } from '../billing/type'
 import AccountDropdown from './account-dropdown'
 import AppNav from './app-nav'
@@ -42,6 +42,13 @@ const Header = () => {
     else
       setShowAccountSettingModal({ payload: ACCOUNT_SETTING_TAB.BILLING })
   }, [isFreePlan, setShowAccountSettingModal, setShowPricingModal])
+  const handleDownloadGraphImportLog = useCallback(() => {
+    void import('@/app/components/workflow/collaboration/core/collaboration-manager')
+      .then(({ collaborationManager }) => {
+        collaborationManager.downloadGraphImportLog()
+      })
+      .catch(() => {})
+  }, [])
 
   const renderLogo = () => (
     <h1>
@@ -91,7 +98,7 @@ const Header = () => {
 
   return (
     <div className="flex h-[56px] items-center">
-      <div className="flex min-w-0 flex-[1]  items-center pl-3 pr-2 min-[1280px]:pr-3">
+      <div className="flex min-w-0 flex-[1] items-center pl-3 pr-2 min-[1280px]:pr-3">
         {renderLogo()}
         <div className="mx-1.5 shrink-0 font-light text-divider-deep">/</div>
         <WorkspaceProvider>
@@ -106,6 +113,14 @@ const Header = () => {
         {!isCurrentWorkspaceDatasetOperator && <ToolsNav className={navClassName} />}
       </div>
       <div className="flex min-w-0 flex-[1] items-center justify-end pl-2 pr-3 min-[1280px]:pl-3">
+        <button
+          type="button"
+          data-testid="workflow-import-log-download"
+          className="left-full top-1/2 ml-1 h-3 w-3 -translate-y-1/2 opacity-0"
+          aria-hidden="true"
+          tabIndex={-1}
+          onClick={handleDownloadGraphImportLog}
+        />
         <EnvNav />
         <div className="mr-2">
           <PluginsNav />

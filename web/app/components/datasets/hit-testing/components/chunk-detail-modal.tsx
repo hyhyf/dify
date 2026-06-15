@@ -12,6 +12,7 @@ import { cn } from '@/utils/classnames'
 import ImageList from '../../common/image-list'
 import Dot from '../../documents/detail/completed/common/dot'
 import { SegmentIndexTag } from '../../documents/detail/completed/common/segment-index-tag'
+import SummaryText from '../../documents/detail/completed/common/summary-text'
 import ChildChunksItem from './child-chunks-item'
 import Mask from './mask'
 import Score from './score'
@@ -28,7 +29,7 @@ const ChunkDetailModal = ({
   onHide,
 }: ChunkDetailModalProps) => {
   const { t } = useTranslation()
-  const { segment, score, child_chunks, files } = payload
+  const { segment, score, child_chunks, files, summary } = payload
   const { position, content, sign_content, keywords, document, answer } = segment
   const isParentChildRetrieval = !!(child_chunks && child_chunks.length > 0)
   const extension = document.name.split('.').slice(-1)[0] as FileAppearanceTypeEnum
@@ -89,13 +90,13 @@ const ChunkDetailModal = ({
               <div className="break-all">
                 <div className="flex gap-x-1">
                   <div className="w-4 shrink-0 text-[13px] font-medium leading-[20px] text-text-tertiary">Q</div>
-                  <div className={cn('body-md-regular line-clamp-20 text-text-secondary')}>
+                  <div className={cn('line-clamp-20 text-text-secondary body-md-regular')}>
                     {content}
                   </div>
                 </div>
                 <div className="flex gap-x-1">
                   <div className="w-4 shrink-0 text-[13px] font-medium leading-[20px] text-text-tertiary">A</div>
-                  <div className={cn('body-md-regular line-clamp-20 text-text-secondary')}>
+                  <div className={cn('line-clamp-20 text-text-secondary body-md-regular')}>
                     {answer}
                   </div>
                 </div>
@@ -104,10 +105,13 @@ const ChunkDetailModal = ({
             {/* Mask */}
             <Mask className="absolute inset-x-0 bottom-0" />
           </div>
-          {(showImages || showKeywords) && (
+          {(showImages || showKeywords || !!summary) && (
             <div className="flex flex-col gap-y-3 pt-3">
               {showImages && (
                 <ImageList images={images} size="md" className="py-1" />
+              )}
+              {!!summary && (
+                <SummaryText value={summary} disabled />
               )}
               {showKeywords && (
                 <div className="flex flex-col gap-y-1">
@@ -125,7 +129,7 @@ const ChunkDetailModal = ({
 
         {isParentChildRetrieval && (
           <div className="flex-1 pb-6 pl-6">
-            <div className="system-xs-semibold-uppercase text-text-secondary">{t(`${i18nPrefix}hitChunks`, { ns: 'datasetHitTesting', num: child_chunks.length })}</div>
+            <div className="text-text-secondary system-xs-semibold-uppercase">{t(`${i18nPrefix}hitChunks`, { ns: 'datasetHitTesting', num: child_chunks.length })}</div>
             <div className={cn('mt-1 space-y-2', heighClassName)}>
               {child_chunks.map(item => (
                 <ChildChunksItem key={item.id} payload={item} isShowAll />

@@ -1,18 +1,16 @@
 'use client'
 import type { FC } from 'react'
 import type { NodeTracing } from '@/types/workflow'
-import {
-  RiArrowDownSLine,
-  RiMenu4Line,
-} from '@remixicon/react'
 import * as React from 'react'
 import {
   useCallback,
+  useMemo,
   useState,
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import formatNodeList from '@/app/components/workflow/run/utils/format-log'
 import { cn } from '@/utils/classnames'
+import { getHoveredParallelId } from './get-hovered-parallel-id'
 import { useLogs } from './hooks'
 import NodePanel from './node'
 import SpecialResultPanel from './special-result-panel'
@@ -53,18 +51,7 @@ const TracingPanel: FC<TracingPanelProps> = ({
   }, [])
 
   const handleParallelMouseLeave = useCallback((e: React.MouseEvent) => {
-    const relatedTarget = e.relatedTarget as Element | null
-    if (relatedTarget && 'closest' in relatedTarget) {
-      const closestParallel = relatedTarget.closest('[data-parallel-id]')
-      if (closestParallel)
-        setHoveredParallel(closestParallel.getAttribute('data-parallel-id'))
-
-      else
-        setHoveredParallel(null)
-    }
-    else {
-      setHoveredParallel(null)
-    }
+    setHoveredParallel(getHoveredParallelId(e.relatedTarget))
   }, [])
 
   const {
@@ -91,7 +78,20 @@ const TracingPanel: FC<TracingPanelProps> = ({
     agentOrToolLogItemStack,
     agentOrToolLogListMap,
     handleShowAgentOrToolLog,
+
+    showLLMDetail,
+    setShowLLMDetailFalse,
+    llmResultList,
+    llmDetailNodeId,
+    handleShowLLMDetail,
   } = useLogs()
+
+  const liveLLMResultList = useMemo(() => {
+    if (!showLLMDetail || !llmDetailNodeId)
+      return llmResultList
+    const node = list.find(n => n.node_id === llmDetailNodeId)
+    return node?.execution_metadata?.llm_trace || llmResultList
+  }, [showLLMDetail, llmDetailNodeId, list, llmResultList])
 
   const renderNode = (node: NodeTracing) => {
     const isParallelFirstNode = !!node.parallelDetail?.isParallelStartNode
@@ -116,9 +116,11 @@ const TracingPanel: FC<TracingPanelProps> = ({
                 isHovered ? 'rounded border-components-button-primary-border bg-components-button-primary-bg text-text-primary-on-surface' : 'text-text-secondary hover:text-text-primary',
               )}
             >
-              {isHovered ? <RiArrowDownSLine className="h-3 w-3" /> : <RiMenu4Line className="h-3 w-3 text-text-tertiary" />}
+              {isHovered
+                ? <span aria-hidden className="i-ri-arrow-down-s-line h-3 w-3" />
+                : <span aria-hidden className="i-ri-menu-4-line h-3 w-3 text-text-tertiary" />}
             </button>
-            <div className="system-xs-semibold-uppercase flex items-center text-text-secondary">
+            <div className="flex items-center text-text-secondary system-xs-semibold-uppercase">
               <span>{parallelDetail.parallelTitle}</span>
             </div>
             <div
@@ -143,7 +145,7 @@ const TracingPanel: FC<TracingPanelProps> = ({
       const isHovered = hoveredParallel === node.id
       return (
         <div key={node.id}>
-          <div className={cn('system-2xs-medium-uppercase -mb-1.5 pl-4', isHovered ? 'text-text-tertiary' : 'text-text-quaternary')}>
+          <div className={cn('-mb-1.5 pl-4 system-2xs-medium-uppercase', isHovered ? 'text-text-tertiary' : 'text-text-quaternary')}>
             {node?.parallelDetail?.branchTitle}
           </div>
           <NodePanel
@@ -153,6 +155,7 @@ const TracingPanel: FC<TracingPanelProps> = ({
             onShowLoopDetail={handleShowLoopResultList}
             onShowRetryDetail={handleShowRetryResultList}
             onShowAgentOrToolLog={handleShowAgentOrToolLog}
+            onShowLLMDetail={handleShowLLMDetail}
             hideInfo={hideNodeInfo}
             hideProcessDetail={hideNodeProcessDetail}
           />
@@ -182,6 +185,10 @@ const TracingPanel: FC<TracingPanelProps> = ({
         agentOrToolLogItemStack={agentOrToolLogItemStack}
         agentOrToolLogListMap={agentOrToolLogListMap}
         handleShowAgentOrToolLog={handleShowAgentOrToolLog}
+
+        showLLMDetail={showLLMDetail}
+        setShowLLMDetailFalse={setShowLLMDetailFalse}
+        llmResultList={liveLLMResultList}
       />
     )
   }

@@ -1,10 +1,12 @@
+import type { InteractionModeType } from '@/app/components/workflow/interaction-mode'
 import type { Node, ToolWithProvider } from '@/app/components/workflow/types'
 import type { SchemaTypeDefinition } from '@/service/use-common'
 import type { FlowType } from '@/types/common'
 import type { NodeWithVar, VarInInspect } from '@/types/workflow'
-import { useCallback } from 'react'
+import { useCallback, useMemo } from 'react'
 import { useStoreApi } from 'reactflow'
 import { useNodesInteractionsWithoutSync } from '@/app/components/workflow/hooks/use-nodes-interactions-without-sync'
+import { InteractionMode } from '@/app/components/workflow/interaction-mode'
 import { useStore, useWorkflowStore } from '@/app/components/workflow/store'
 import {
   useAllBuiltInTools,
@@ -14,17 +16,20 @@ import {
 } from '@/service/use-tools'
 import { useInvalidateConversationVarValues, useInvalidateSysVarValues } from '@/service/use-workflow'
 import { fetchAllInspectVars } from '@/service/workflow'
-import useMatchSchemaType, { getMatchedSchemaType } from '../nodes/_base/components/variable/use-match-schema-type'
-import { toNodeOutputVars } from '../nodes/_base/components/variable/utils'
+import useMatchSchemaType from '../nodes/_base/components/variable/use-match-schema-type'
+import { isValueSelectorInNodeOutputVars, toNodeOutputVars } from '../nodes/_base/components/variable/utils'
+import { applyAgentSubgraphInspectVars } from './inspect-vars-agent-alias'
 
 type Params = {
   flowType: FlowType
   flowId: string
+  interactionMode?: InteractionModeType
 }
 
 export const useSetWorkflowVarsWithValue = ({
   flowType,
   flowId,
+  interactionMode,
 }: Params) => {
   const workflowStore = useWorkflowStore()
   const store = useStoreApi()
@@ -37,47 +42,65 @@ export const useSetWorkflowVarsWithValue = ({
   const { data: workflowTools } = useAllWorkflowTools()
   const { data: mcpTools } = useAllMCPTools()
   const dataSourceList = useStore(s => s.dataSourceList)
-  const allPluginInfoList = {
-    buildInTools: buildInTools || [],
-    customTools: customTools || [],
-    workflowTools: workflowTools || [],
-    mcpTools: mcpTools || [],
-    dataSourceList: dataSourceList || [],
-  }
+  const parentAvailableNodesFromStore = useStore(s => s.parentAvailableNodes)
+  const parentAvailableNodes = useMemo(() => parentAvailableNodesFromStore || [], [parentAvailableNodesFromStore])
 
-  const setInspectVarsToStore = (inspectVars: VarInInspect[], passedInAllPluginInfoList?: Record<string, ToolWithProvider[]>, passedInSchemaTypeDefinitions?: SchemaTypeDefinition[]) => {
+  const allPluginInfoList = useMemo(() => {
+    return {
+      buildInTools: buildInTools || [],
+      customTools: customTools || [],
+      workflowTools: workflowTools || [],
+      mcpTools: mcpTools || [],
+      dataSourceList: dataSourceList || [],
+    }
+  }, [buildInTools, customTools, workflowTools, mcpTools, dataSourceList])
+
+  const setInspectVarsToStore = useCallback((inspectVars: VarInInspect[], passedInAllPluginInfoList?: Record<string, ToolWithProvider[]>, passedInSchemaTypeDefinitions?: SchemaTypeDefinition[]) => {
     const { setNodesWithInspectVars } = workflowStore.getState()
     const { getNodes } = store.getState()
 
     const nodeArr = getNodes()
-    const allNodesOutputVars = toNodeOutputVars(nodeArr, false, () => true, [], [], [], passedInAllPluginInfoList || allPluginInfoList, passedInSchemaTypeDefinitions || schemaTypeDefinitions)
+    const parentNodeIds = new Set(parentAvailableNodes.map(node => node.id))
+    const nodeMap = new Map(nodeArr.map(node => [node.id, node]))
+    parentAvailableNodes.forEach((node) => {
+      if (!nodeMap.has(node.id))
+        nodeMap.set(node.id, node)
+    })
+    const allNodes = Array.from(nodeMap.values())
+    const allNodesOutputVars = toNodeOutputVars(allNodes, false, () => true, [], [], [], passedInAllPluginInfoList || allPluginInfoList, passedInSchemaTypeDefinitions || schemaTypeDefinitions)
 
     const nodesKeyValue: Record<string, Node> = {}
-    nodeArr.forEach((node) => {
+    allNodes.forEach((node) => {
       nodesKeyValue[node.id] = node
     })
 
     const withValueNodeIds: Record<string, boolean> = {}
     inspectVars.forEach((varItem) => {
       const nodeId = varItem.selector[0]
-
       const node = nodesKeyValue[nodeId]
       if (!node)
         return
       withValueNodeIds[nodeId] = true
     })
+
     const withValueNodes = Object.keys(withValueNodeIds).map((nodeId) => {
       return nodesKeyValue[nodeId]
     })
 
-    const res: NodeWithVar[] = withValueNodes.map((node) => {
+    const resolvedInteractionMode = interactionMode ?? InteractionMode.Default
+    const nodesWithVars: NodeWithVar[] = withValueNodes.map((node) => {
       const nodeId = node.id
-      const varsUnderTheNode = inspectVars.filter((varItem) => {
-        return varItem.selector[0] === nodeId
-      })
+      const isParentNode = resolvedInteractionMode === InteractionMode.Subgraph && parentNodeIds.has(nodeId)
       const nodeVar = allNodesOutputVars.find(item => item.nodeId === nodeId)
+      const varsUnderTheNode = inspectVars.filter((varItem) => {
+        if (varItem.selector[0] !== nodeId)
+          return false
+        if (!nodeVar)
+          return false
+        return isValueSelectorInNodeOutputVars(varItem.selector, [nodeVar])
+      })
 
-      const nodeWithVar = {
+      return {
         nodeId,
         nodePayload: node.data,
         nodeType: node.data.type,
@@ -91,11 +114,14 @@ export const useSetWorkflowVarsWithValue = ({
         }),
         isSingRunRunning: false,
         isValueFetched: false,
+        isHidden: isParentNode,
       }
-      return nodeWithVar
     })
-    setNodesWithInspectVars(res)
-  }
+
+    const shouldApplyAlias = resolvedInteractionMode !== InteractionMode.Subgraph
+    const nextNodes = shouldApplyAlias ? applyAgentSubgraphInspectVars(nodesWithVars, allNodes) : nodesWithVars
+    setNodesWithInspectVars(nextNodes)
+  }, [workflowStore, store, parentAvailableNodes, allPluginInfoList, schemaTypeDefinitions, interactionMode])
 
   const fetchInspectVars = useCallback(async (params: {
     passInVars?: boolean
@@ -109,7 +135,8 @@ export const useSetWorkflowVarsWithValue = ({
     const data = passInVars ? vars! : await fetchAllInspectVars(flowType, flowId)
     setInspectVarsToStore(data, passedInAllPluginInfoList, passedInSchemaTypeDefinitions)
     handleCancelAllNodeSuccessStatus() // to make sure clear node output show the unset status
-  }, [invalidateConversationVarValues, invalidateSysVarValues, flowType, flowId, setInspectVarsToStore, handleCancelAllNodeSuccessStatus, schemaTypeDefinitions, getMatchedSchemaType])
+  }, [invalidateConversationVarValues, invalidateSysVarValues, flowType, flowId, setInspectVarsToStore, handleCancelAllNodeSuccessStatus])
+
   return {
     fetchInspectVars,
   }

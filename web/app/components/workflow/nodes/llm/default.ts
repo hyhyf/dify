@@ -4,6 +4,7 @@ import { genNodeMetaData } from '@/app/components/workflow/utils'
 // import { RETRIEVAL_OUTPUT_STRUCT } from '../../constants'
 import { AppModeEnum } from '@/types/app'
 import { BlockEnum, EditionType, PromptRole } from '../../types'
+import { getLLMModelIssue, LLMModelIssueCode } from './utils'
 
 const RETRIEVAL_OUTPUT_STRUCT = `{
   "content": "",
@@ -42,6 +43,7 @@ const nodeDefault: NodeDefault<LLMNodeType> = {
         temperature: 0.7,
       },
     },
+    computer_use: true,
     prompt_template: [{
       role: PromptRole.system,
       text: '',
@@ -53,6 +55,7 @@ const nodeDefault: NodeDefault<LLMNodeType> = {
     vision: {
       enabled: false,
     },
+    max_iterations: 100,
   },
   defaultRunInputData: {
     '#context#': [RETRIEVAL_OUTPUT_STRUCT],
@@ -60,7 +63,8 @@ const nodeDefault: NodeDefault<LLMNodeType> = {
   },
   checkValid(payload: LLMNodeType, t: any) {
     let errorMessages = ''
-    if (!errorMessages && !payload.model.provider)
+    const modelIssue = getLLMModelIssue({ modelProvider: payload.model.provider })
+    if (!errorMessages && modelIssue === LLMModelIssueCode.providerRequired)
       errorMessages = t(`${i18nPrefix}.fieldRequired`, { ns: 'workflow', field: t(`${i18nPrefix}.fields.model`, { ns: 'workflow' }) })
 
     if (!errorMessages && !payload.memory) {

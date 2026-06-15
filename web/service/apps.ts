@@ -1,8 +1,10 @@
 import type { TracingProvider } from '@/app/(commonLayout)/app/(appDetailLayout)/[appId]/overview/tracing/type'
+import type { AppExportBundleResponse, AppRuntimeUpgradeResponse } from '@/contract/console/apps'
 import type { ApiKeysListResponse, AppDailyConversationsResponse, AppDailyEndUsersResponse, AppDailyMessagesResponse, AppDetailResponse, AppListResponse, AppStatisticsResponse, AppTemplatesResponse, AppTokenCostsResponse, AppVoicesListResponse, CreateApiKeyResponse, DSLImportMode, DSLImportResponse, GenerationIntroductionResponse, TracingConfig, TracingStatus, UpdateAppModelConfigResponse, UpdateAppSiteCodeResponse, UpdateOpenAIKeyResponse, ValidateOpenAIKeyResponse, WebhookTriggerResponse, WorkflowDailyConversationsResponse } from '@/models/app'
 import type { CommonResponse } from '@/models/common'
 import type { AppIconType, AppModeEnum, ModelConfig } from '@/types/app'
 import { del, get, patch, post, put } from './base'
+import { consoleClient } from './client'
 
 export const fetchAppList = ({ url, params }: { url: string, params?: Record<string, any> }): Promise<AppListResponse> => {
   return get<AppListResponse>(url, { params })
@@ -83,6 +85,12 @@ export const copyApp = ({
   return post<AppDetailResponse>(`apps/${appID}/copy`, { body: { name, icon_type, icon, icon_background, mode, description } })
 }
 
+export const upgradeAppRuntime = (appID: string): Promise<AppRuntimeUpgradeResponse> => {
+  return consoleClient.apps.upgradeRuntime({
+    params: { appId: appID },
+  })
+}
+
 export const exportAppConfig = ({ appID, include = false, workflowID }: { appID: string, include?: boolean, workflowID?: string }): Promise<{ data: string }> => {
   const params = new URLSearchParams({
     include_secret: include.toString(),
@@ -92,12 +100,64 @@ export const exportAppConfig = ({ appID, include = false, workflowID }: { appID:
   return get<{ data: string }>(`apps/${appID}/export?${params.toString()}`)
 }
 
+export const exportAppBundle = async ({ appID, include = false, workflowID }: { appID: string, include?: boolean, workflowID?: string }): Promise<void> => {
+  const result: AppExportBundleResponse = await consoleClient.apps.exportBundle({
+    params: { appId: appID },
+    query: {
+      include_secret: include,
+      ...(workflowID ? { workflow_id: workflowID } : {}),
+    },
+  })
+
+  const a = document.createElement('a')
+  a.href = result.download_url
+  a.download = result.filename
+  a.click()
+}
+
 export const importDSL = ({ mode, yaml_content, yaml_url, app_id, name, description, icon_type, icon, icon_background }: { mode: DSLImportMode, yaml_content?: string, yaml_url?: string, app_id?: string, name?: string, description?: string, icon_type?: AppIconType, icon?: string, icon_background?: string }): Promise<DSLImportResponse> => {
   return post<DSLImportResponse>('apps/imports', { body: { mode, yaml_content, yaml_url, app_id, name, description, icon, icon_type, icon_background } })
 }
 
 export const importDSLConfirm = ({ import_id }: { import_id: string }): Promise<DSLImportResponse> => {
   return post<DSLImportResponse>(`apps/imports/${import_id}/confirm`, { body: {} })
+}
+
+export const importAppBundle = async ({
+  file,
+  name,
+  description,
+  icon_type,
+  icon,
+  icon_background,
+}: {
+  file: File
+  name?: string
+  description?: string
+  icon_type?: string
+  icon?: string
+  icon_background?: string
+}): Promise<DSLImportResponse> => {
+  const { import_id, upload_url } = await consoleClient.apps.importsBundle.prepare()
+
+  const uploadResponse = await fetch(upload_url, {
+    method: 'PUT',
+    body: file,
+  })
+
+  if (!uploadResponse.ok)
+    throw new Error('Failed to upload bundle file')
+
+  return consoleClient.apps.importsBundle.confirm({
+    params: { importId: import_id },
+    body: {
+      name,
+      description,
+      icon_type,
+      icon,
+      icon_background,
+    },
+  })
 }
 
 export const switchApp = ({ appID, name, icon_type, icon, icon_background }: { appID: string, name: string, icon_type: AppIconType, icon: string, icon_background?: string | null }): Promise<{ new_app_id: string }> => {

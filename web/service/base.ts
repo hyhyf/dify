@@ -8,6 +8,9 @@ import type {
 } from '@/types/pipeline'
 import type {
   AgentLogResponse,
+  HumanInputFormFilledResponse,
+  HumanInputFormTimeoutResponse,
+  HumanInputRequiredResponse,
   IterationFinishedResponse,
   IterationNextResponse,
   IterationStartedResponse,
@@ -21,18 +24,26 @@ import type {
   TextChunkResponse,
   TextReplaceResponse,
   WorkflowFinishedResponse,
+  WorkflowPausedResponse,
   WorkflowStartedResponse,
 } from '@/types/workflow'
 import Cookies from 'js-cookie'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { API_PREFIX, CSRF_COOKIE_NAME, CSRF_HEADER_NAME, IS_CE_EDITION, PASSPORT_HEADER_NAME, PUBLIC_API_PREFIX, WEB_APP_SHARE_CODE_HEADER_NAME } from '@/config'
 import { asyncRunSafe } from '@/utils'
 import { basePath } from '@/utils/var'
 import { base, ContentType, getBaseOptions } from './fetch'
-import { refreshAccessTokenOrRelogin } from './refresh-token'
+import { refreshAccessTokenOrReLogin } from './refresh-token'
 import { getWebAppPassport } from './webapp-auth'
 
 const TIME_OUT = 100000
+const SIGNIN_REDIRECT_URL_KEY = 'oauth_redirect_url'
+const OAUTH_AUTHORIZE_PATH = '/account/oauth/authorize'
+
+export type IconObject = {
+  background: string
+  content: string
+}
 
 export type IOnDataMoreInfo = {
   conversationId?: string
@@ -40,6 +51,24 @@ export type IOnDataMoreInfo = {
   messageId: string
   errorMessage?: string
   errorCode?: string
+  chunk_type?: 'text' | 'tool_call' | 'tool_result' | 'thought' | 'thought_start' | 'thought_end' | 'model_start' | 'model_end'
+  node_id?: string
+  tool_call_id?: string
+  tool_name?: string
+  tool_arguments?: string
+  tool_icon?: string | IconObject
+  tool_icon_dark?: string | IconObject
+
+  tool_files?: string[]
+  tool_error?: string
+  tool_elapsed_time?: number
+
+  model_provider?: string
+  model_name?: string
+  model_icon?: string | IconObject
+  model_icon_dark?: string | IconObject
+  model_usage?: Record<string, number | string> | null
+  model_duration?: number
 }
 
 export type IOnData = (message: string, isFirstMessage: boolean, moreInfo: IOnDataMoreInfo) => void
@@ -70,6 +99,10 @@ export type IOnLoopNext = (workflowStarted: LoopNextResponse) => void
 export type IOnLoopFinished = (workflowFinished: LoopFinishedResponse) => void
 export type IOnAgentLog = (agentLog: AgentLogResponse) => void
 
+export type IOHumanInputRequired = (humanInputRequired: HumanInputRequiredResponse) => void
+export type IOnHumanInputFormFilled = (humanInputFormFilled: HumanInputFormFilledResponse) => void
+export type IOnHumanInputFormTimeout = (humanInputFormTimeout: HumanInputFormTimeoutResponse) => void
+export type IOWorkflowPaused = (workflowPaused: WorkflowPausedResponse) => void
 export type IOnDataSourceNodeProcessing = (dataSourceNodeProcessing: DataSourceNodeProcessingResponse) => void
 export type IOnDataSourceNodeCompleted = (dataSourceNodeCompleted: DataSourceNodeCompletedResponse) => void
 export type IOnDataSourceNodeError = (dataSourceNodeError: DataSourceNodeErrorResponse) => void
@@ -113,6 +146,10 @@ export type IOtherOptions = {
   onLoopNext?: IOnLoopNext
   onLoopFinish?: IOnLoopFinished
   onAgentLog?: IOnAgentLog
+  onHumanInputRequired?: IOHumanInputRequired
+  onHumanInputFormFilled?: IOnHumanInputFormFilled
+  onHumanInputFormTimeout?: IOnHumanInputFormTimeout
+  onWorkflowPaused?: IOWorkflowPaused
 
   // Pipeline data source node run
   onDataSourceNodeProcessing?: IOnDataSourceNodeProcessing
@@ -127,6 +164,26 @@ function jumpTo(url: string) {
   if (targetPath === globalThis.location.pathname)
     return
   globalThis.location.href = url
+}
+
+export function buildSigninUrlWithRedirect(currentLocation: Pick<Location, 'origin' | 'pathname' | 'search'>, currentBasePath: string) {
+  const signinPath = `${currentBasePath}/signin`
+  const signinUrl = `${currentLocation.origin}${signinPath}`
+  const oauthAuthorizePath = `${currentBasePath}${OAUTH_AUTHORIZE_PATH}`
+
+  // Keep signin as-is to avoid redirect loops.
+  if (currentLocation.pathname === signinPath)
+    return signinUrl
+
+  // Only OAuth authorization flow requires preserving the full original URL.
+  // For generic 401 redirects (e.g. manual logout), keep signin URL clean.
+  if (currentLocation.pathname !== oauthAuthorizePath)
+    return signinUrl
+
+  const currentUrl = `${currentLocation.origin}${currentLocation.pathname}${currentLocation.search}`
+  const params = new URLSearchParams()
+  params.set(SIGNIN_REDIRECT_URL_KEY, encodeURIComponent(currentUrl))
+  return `${signinUrl}?${params.toString()}`
 }
 
 function unicodeToChar(text: string) {
@@ -151,6 +208,14 @@ function requiredWebSSOLogin(message?: string, code?: number) {
   if (code)
     params.append('code', String(code))
   globalThis.location.href = `${globalThis.location.origin}${basePath}${WBB_APP_LOGIN_PATH}?${params.toString()}`
+}
+
+function formatURL(url: string, isPublicAPI: boolean) {
+  const urlPrefix = isPublicAPI ? PUBLIC_API_PREFIX : API_PREFIX
+  if (url.startsWith('http://') || url.startsWith('https://'))
+    return url
+  const urlWithoutProtocol = url.startsWith('/') ? url : `/${url}`
+  return `${urlPrefix}${urlWithoutProtocol}`
 }
 
 export function format(text: string) {
@@ -187,6 +252,10 @@ export const handleStream = (
   onTTSEnd?: IOnTTSEnd,
   onTextReplace?: IOnTextReplace,
   onAgentLog?: IOnAgentLog,
+  onHumanInputRequired?: IOHumanInputRequired,
+  onHumanInputFormFilled?: IOnHumanInputFormFilled,
+  onHumanInputFormTimeout?: IOnHumanInputFormTimeout,
+  onWorkflowPaused?: IOWorkflowPaused,
   onDataSourceNodeProcessing?: IOnDataSourceNodeProcessing,
   onDataSourceNodeCompleted?: IOnDataSourceNodeCompleted,
   onDataSourceNodeError?: IOnDataSourceNodeError,
@@ -250,6 +319,22 @@ export const handleStream = (
                 conversationId: bufferObj.conversation_id,
                 taskId: bufferObj.task_id,
                 messageId: bufferObj.id,
+                chunk_type: bufferObj.chunk_type,
+                node_id: bufferObj.node_id,
+                tool_call_id: bufferObj.tool_call_id,
+                tool_name: bufferObj.tool_name,
+                tool_arguments: bufferObj.tool_arguments,
+                tool_icon: bufferObj.tool_icon,
+                tool_icon_dark: bufferObj.tool_icon_dark,
+                tool_files: bufferObj.tool_files,
+                tool_error: bufferObj.tool_error,
+                tool_elapsed_time: bufferObj.tool_elapsed_time,
+                model_provider: bufferObj.model_provider,
+                model_name: bufferObj.model_name,
+                model_icon: bufferObj.model_icon,
+                model_icon_dark: bufferObj.model_icon_dark,
+                model_usage: bufferObj.model_usage,
+                model_duration: bufferObj.model_duration,
               })
               isFirstMessage = false
             }
@@ -318,6 +403,18 @@ export const handleStream = (
             }
             else if (bufferObj.event === 'tts_message_end') {
               onTTSEnd?.(bufferObj.message_id, bufferObj.audio)
+            }
+            else if (bufferObj.event === 'human_input_required') {
+              onHumanInputRequired?.(bufferObj as HumanInputRequiredResponse)
+            }
+            else if (bufferObj.event === 'human_input_form_filled') {
+              onHumanInputFormFilled?.(bufferObj as HumanInputFormFilledResponse)
+            }
+            else if (bufferObj.event === 'human_input_form_timeout') {
+              onHumanInputFormTimeout?.(bufferObj as HumanInputFormTimeoutResponse)
+            }
+            else if (bufferObj.event === 'workflow_paused') {
+              onWorkflowPaused?.(bufferObj as WorkflowPausedResponse)
             }
             else if (bufferObj.event === 'datasource_processing') {
               onDataSourceNodeProcessing?.(bufferObj as DataSourceNodeProcessingResponse)
@@ -396,7 +493,9 @@ export const upload = async (options: UploadOptions, isPublicAPI?: boolean, url?
     xhr.responseType = 'json'
     xhr.onreadystatechange = function () {
       if (xhr.readyState === 4) {
-        if (xhr.status === 201)
+        // Accept any 2xx status code per HTTP semantics
+        // POST returns 201 Created, PUT returns 200 OK
+        if (xhr.status >= 200 && xhr.status < 300)
           resolve(xhr.response)
         else
           reject(xhr)
@@ -441,6 +540,10 @@ export const ssePost = async (
     onLoopStart,
     onLoopNext,
     onLoopFinish,
+    onHumanInputRequired,
+    onHumanInputFormFilled,
+    onHumanInputFormTimeout,
+    onWorkflowPaused,
     onDataSourceNodeProcessing,
     onDataSourceNodeCompleted,
     onDataSourceNodeError,
@@ -467,10 +570,7 @@ export const ssePost = async (
 
   getAbortController?.(abortController)
 
-  const urlPrefix = isPublicAPI ? PUBLIC_API_PREFIX : API_PREFIX
-  const urlWithPrefix = (url.startsWith('http://') || url.startsWith('https://'))
-    ? url
-    : `${urlPrefix}${url.startsWith('/') ? url : `/${url}`}`
+  const urlWithPrefix = formatURL(url, isPublicAPI)
 
   const { body } = options
   if (body)
@@ -495,7 +595,7 @@ export const ssePost = async (
             })
           }
           else {
-            refreshAccessTokenOrRelogin(TIME_OUT).then(() => {
+            refreshAccessTokenOrReLogin(TIME_OUT).then(() => {
               ssePost(url, fetchOptions, otherOptions)
             }).catch((err) => {
               console.error(err)
@@ -504,7 +604,7 @@ export const ssePost = async (
         }
         else {
           res.json().then((data) => {
-            Toast.notify({ type: 'error', message: data.message || 'Server Error' })
+            toast.error(data.message || 'Server Error')
           })
           onError?.('Server Error')
         }
@@ -517,7 +617,7 @@ export const ssePost = async (
             onError?.(moreInfo.errorMessage, moreInfo.errorCode)
             // TypeError: Cannot assign to read only property ... will happen in page leave, so it should be ignored.
             if (moreInfo.errorMessage !== 'AbortError: The user aborted a request.' && !moreInfo.errorMessage.includes('TypeError: Cannot assign to read only property'))
-              Toast.notify({ type: 'error', message: moreInfo.errorMessage })
+              toast.error(moreInfo.errorMessage)
             return
           }
           onData?.(str, isFirstMessage, moreInfo)
@@ -545,6 +645,157 @@ export const ssePost = async (
         onTTSEnd,
         onTextReplace,
         onAgentLog,
+        onHumanInputRequired,
+        onHumanInputFormFilled,
+        onHumanInputFormTimeout,
+        onWorkflowPaused,
+        onDataSourceNodeProcessing,
+        onDataSourceNodeCompleted,
+        onDataSourceNodeError,
+      )
+    })
+    .catch((e) => {
+      if (e.toString() !== 'AbortError: The user aborted a request.' && !e.toString().errorMessage.includes('TypeError: Cannot assign to read only property'))
+        toast.error(String(e))
+      onError?.(e)
+    })
+}
+
+export const sseGet = async (
+  url: string,
+  fetchOptions: FetchOptionType,
+  otherOptions: IOtherOptions,
+) => {
+  const {
+    isPublicAPI = false,
+    onData,
+    onCompleted,
+    onThought,
+    onFile,
+    onMessageEnd,
+    onMessageReplace,
+    onWorkflowStarted,
+    onWorkflowFinished,
+    onNodeStarted,
+    onNodeFinished,
+    onIterationStart,
+    onIterationNext,
+    onIterationFinish,
+    onNodeRetry,
+    onParallelBranchStarted,
+    onParallelBranchFinished,
+    onTextChunk,
+    onTTSChunk,
+    onTTSEnd,
+    onTextReplace,
+    onAgentLog,
+    onError,
+    getAbortController,
+    onLoopStart,
+    onLoopNext,
+    onLoopFinish,
+    onHumanInputRequired,
+    onHumanInputFormFilled,
+    onHumanInputFormTimeout,
+    onWorkflowPaused,
+    onDataSourceNodeProcessing,
+    onDataSourceNodeCompleted,
+    onDataSourceNodeError,
+  } = otherOptions
+  const abortController = new AbortController()
+
+  const baseOptions = getBaseOptions()
+  const shareCode = globalThis.location.pathname.split('/').slice(-1)[0]
+  const options = Object.assign({}, baseOptions, {
+    signal: abortController.signal,
+    headers: new Headers({
+      [CSRF_HEADER_NAME]: Cookies.get(CSRF_COOKIE_NAME()) || '',
+      [WEB_APP_SHARE_CODE_HEADER_NAME]: shareCode,
+      [PASSPORT_HEADER_NAME]: getWebAppPassport(shareCode),
+    }),
+  } as RequestInit, fetchOptions)
+
+  const contentType = (options.headers as Headers).get('Content-Type')
+  if (!contentType)
+    (options.headers as Headers).set('Content-Type', ContentType.json)
+
+  getAbortController?.(abortController)
+
+  const urlWithPrefix = formatURL(url, isPublicAPI)
+
+  globalThis.fetch(urlWithPrefix, options as RequestInit)
+    .then((res) => {
+      if (!/^[23]\d{2}$/.test(String(res.status))) {
+        if (res.status === 401) {
+          if (isPublicAPI) {
+            res.json().then((data: { code?: string, message?: string }) => {
+              if (isPublicAPI) {
+                if (data.code === 'web_app_access_denied')
+                  requiredWebSSOLogin(data.message, 403)
+
+                if (data.code === 'web_sso_auth_required')
+                  requiredWebSSOLogin()
+
+                if (data.code === 'unauthorized')
+                  requiredWebSSOLogin()
+              }
+            })
+          }
+          else {
+            refreshAccessTokenOrReLogin(TIME_OUT).then(() => {
+              sseGet(url, fetchOptions, otherOptions)
+            }).catch((err) => {
+              console.error(err)
+            })
+          }
+        }
+        else {
+          res.json().then((data) => {
+            toast.error(data.message || 'Server Error')
+          })
+          onError?.('Server Error')
+        }
+        return
+      }
+      return handleStream(
+        res,
+        (str: string, isFirstMessage: boolean, moreInfo: IOnDataMoreInfo) => {
+          if (moreInfo.errorMessage) {
+            onError?.(moreInfo.errorMessage, moreInfo.errorCode)
+            // TypeError: Cannot assign to read only property ... will happen in page leave, so it should be ignored.
+            if (moreInfo.errorMessage !== 'AbortError: The user aborted a request.' && !moreInfo.errorMessage.includes('TypeError: Cannot assign to read only property'))
+              toast.error(moreInfo.errorMessage)
+            return
+          }
+          onData?.(str, isFirstMessage, moreInfo)
+        },
+        onCompleted,
+        onThought,
+        onMessageEnd,
+        onMessageReplace,
+        onFile,
+        onWorkflowStarted,
+        onWorkflowFinished,
+        onNodeStarted,
+        onNodeFinished,
+        onIterationStart,
+        onIterationNext,
+        onIterationFinish,
+        onLoopStart,
+        onLoopNext,
+        onLoopFinish,
+        onNodeRetry,
+        onParallelBranchStarted,
+        onParallelBranchFinished,
+        onTextChunk,
+        onTTSChunk,
+        onTTSEnd,
+        onTextReplace,
+        onAgentLog,
+        onHumanInputRequired,
+        onHumanInputFormFilled,
+        onHumanInputFormTimeout,
+        onWorkflowPaused,
         onDataSourceNodeProcessing,
         onDataSourceNodeCompleted,
         onDataSourceNodeError,
@@ -552,7 +803,7 @@ export const ssePost = async (
     })
     .catch((e) => {
       if (e.toString() !== 'AbortError: The user aborted a request.' && !e.toString().includes('TypeError: Cannot assign to read only property'))
-        Toast.notify({ type: 'error', message: e })
+        toast.error(String(e))
       onError?.(e)
     })
 }
@@ -567,7 +818,7 @@ export const request = async<T>(url: string, options = {}, otherOptions?: IOther
     const errResp: Response = err as any
     if (errResp.status === 401) {
       const [parseErr, errRespData] = await asyncRunSafe<ResponseError>(errResp.json())
-      const loginUrl = `${globalThis.location.origin}${basePath}/signin`
+      const loginUrl = buildSigninUrlWithRedirect(globalThis.location, basePath)
       if (parseErr) {
         globalThis.location.href = loginUrl
         return Promise.reject(err)
@@ -599,7 +850,7 @@ export const request = async<T>(url: string, options = {}, otherOptions?: IOther
         return Promise.reject(err)
       }
       if (code === 'init_validate_failed' && IS_CE_EDITION && !silent) {
-        Toast.notify({ type: 'error', message, duration: 4000 })
+        toast.error(message, { timeout: 4000 })
         return Promise.reject(err)
       }
       if (code === 'not_init_validated' && IS_CE_EDITION) {
@@ -612,7 +863,7 @@ export const request = async<T>(url: string, options = {}, otherOptions?: IOther
       }
 
       // refresh token
-      const [refreshErr] = await asyncRunSafe(refreshAccessTokenOrRelogin(TIME_OUT))
+      const [refreshErr] = await asyncRunSafe(refreshAccessTokenOrReLogin(TIME_OUT))
       if (refreshErr === null)
         return baseFetch<T>(url, options, otherOptionsForBaseFetch)
       if (location.pathname !== `${basePath}/signin` || !IS_CE_EDITION) {
@@ -620,7 +871,7 @@ export const request = async<T>(url: string, options = {}, otherOptions?: IOther
         return Promise.reject(err)
       }
       if (!silent) {
-        Toast.notify({ type: 'error', message })
+        toast.error(message)
         return Promise.reject(err)
       }
       jumpTo(loginUrl)

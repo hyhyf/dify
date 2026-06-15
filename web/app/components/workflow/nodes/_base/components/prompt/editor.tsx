@@ -62,6 +62,9 @@ type Props = {
   nodesOutputVars?: NodeOutPutVar[]
   availableNodes?: Node[]
   isSupportFileVar?: boolean
+  isSupportSandbox?: boolean
+  promptMetadata?: Record<string, unknown>
+  onPromptMetadataChange?: (metadata: Record<string, unknown>) => void
   isSupportPromptGenerator?: boolean
   onGenerated?: (prompt: string) => void
   modelConfig?: ModelConfig
@@ -80,6 +83,10 @@ type Props = {
   placeholderClassName?: string
   titleClassName?: string
   required?: boolean
+  onBlur?: () => void
+  onFocus?: () => void
+  disableToolBlocks?: boolean
+  footer?: ReactNode
 }
 
 const Editor: FC<Props> = ({
@@ -102,6 +109,9 @@ const Editor: FC<Props> = ({
   nodesOutputVars,
   availableNodes = [],
   isSupportFileVar,
+  isSupportSandbox,
+  promptMetadata,
+  onPromptMetadataChange,
   isSupportPromptGenerator,
   isSupportJinja,
   editionType,
@@ -119,6 +129,10 @@ const Editor: FC<Props> = ({
   titleClassName,
   editorContainerClassName,
   required,
+  onBlur,
+  onFocus,
+  disableToolBlocks,
+  footer,
 }) => {
   const { t } = useTranslation()
   const { eventEmitter } = useEventEmitterContextContext()
@@ -147,7 +161,7 @@ const Editor: FC<Props> = ({
 
   const handleInsertVariable = () => {
     setFocus()
-    eventEmitter?.emit({ type: PROMPT_EDITOR_INSERT_QUICKLY, instanceId } as any)
+    eventEmitter?.emit({ type: PROMPT_EDITOR_INSERT_QUICKLY, instanceId })
   }
 
   const getVarType = useWorkflowVariableType()
@@ -156,7 +170,16 @@ const Editor: FC<Props> = ({
 
   return (
     <Wrap className={cn(className, wrapClassName)} style={wrapStyle} isInNode isExpand={isExpand}>
-      <div ref={ref} className={cn(isFocus ? (gradientBorder && 'bg-gradient-to-r from-components-input-border-active-prompt-1 to-components-input-border-active-prompt-2') : 'bg-transparent', isExpand && 'h-full', '!rounded-[9px] p-0.5', containerClassName)}>
+      <div
+        ref={ref}
+        data-prompt-editor-panel="true"
+        className={cn(
+          isFocus ? (gradientBorder && 'bg-gradient-to-r from-components-input-border-active-prompt-1 to-components-input-border-active-prompt-2') : 'bg-transparent hover:bg-divider-regular',
+          isExpand && 'h-full',
+          '!rounded-[9px] p-0.5 transition-colors',
+          containerClassName,
+        )}
+      >
         <div className={cn(isFocus ? 'bg-background-default' : 'bg-components-input-bg-normal', isExpand && 'flex h-full flex-col', 'rounded-lg', containerClassName)}>
           <div className={cn('flex items-center justify-between pl-3 pr-2 pt-1', headerClassName)}>
             <div className="flex gap-2">
@@ -196,7 +219,7 @@ const Editor: FC<Props> = ({
                       <Jinja className="h-3 w-6 text-text-quaternary" />
                       <Switch
                         size="sm"
-                        defaultValue={editionType === EditionType.jinja2}
+                        value={editionType === EditionType.jinja2}
                         onChange={(checked) => {
                           onEditionTypeChange?.(checked ? EditionType.jinja2 : EditionType.basic)
                         }}
@@ -240,12 +263,13 @@ const Editor: FC<Props> = ({
           <div className={cn('pb-2', isExpand && 'flex grow flex-col')}>
             {!(isSupportJinja && editionType === EditionType.jinja2)
               ? (
-                  <div className={cn(isExpand ? 'grow' : 'max-h-[536px]', 'relative min-h-[56px] overflow-y-auto  px-3', editorContainerClassName)}>
+                  <div className={cn(isExpand ? 'grow' : 'max-h-[536px]', 'relative min-h-[56px] overflow-y-auto px-3', editorContainerClassName)}>
                     <PromptEditor
-                      key={controlPromptEditorRerenderKey}
+                      key={`${controlPromptEditorRerenderKey}-${readOnly ? 'ro' : 'rw'}`}
                       placeholder={placeholder}
                       placeholderClassName={placeholderClassName}
                       instanceId={instanceId}
+                      nodeId={nodeId}
                       compact
                       className={cn('min-h-[56px]', inputClassName)}
                       style={isExpand ? { height: editorExpandHeight - 5 } : {}}
@@ -278,6 +302,9 @@ const Editor: FC<Props> = ({
                             width: node.width,
                             height: node.height,
                             position: node.position,
+                            ...(node.data.type === BlockEnum.LLM && {
+                              modelProvider: (node.data as { model?: ModelConfig }).model?.provider,
+                            }),
                           }
                           if (node.data.type === BlockEnum.Start) {
                             acc.sys = {
@@ -291,17 +318,27 @@ const Editor: FC<Props> = ({
                         onManageInputField: () => setShowInputFieldPanel?.(true),
                       }}
                       onChange={onChange}
-                      onBlur={setBlur}
-                      onFocus={setFocus}
+                      onBlur={() => {
+                        setBlur()
+                        onBlur?.()
+                      }}
+                      onFocus={() => {
+                        setFocus()
+                        onFocus?.()
+                      }}
                       editable={!readOnly}
                       isSupportFileVar={isSupportFileVar}
+                      isSupportSandbox={isSupportSandbox}
+                      disableToolBlocks={disableToolBlocks}
+                      toolMetadata={promptMetadata}
+                      onToolMetadataChange={onPromptMetadataChange}
                     />
                     {/* to patch Editor not support dynamic change editable status */}
                     {readOnly && <div className="absolute inset-0 z-10"></div>}
                   </div>
                 )
               : (
-                  <div className={cn(isExpand ? 'grow' : 'max-h-[536px]', 'relative min-h-[56px] overflow-y-auto  px-3', editorContainerClassName)}>
+                  <div className={cn(isExpand ? 'grow' : 'max-h-[536px]', 'relative min-h-[56px] overflow-y-auto px-3', editorContainerClassName)}>
                     <CodeEditor
                       availableVars={nodesOutputVars || []}
                       varList={varList}
@@ -314,9 +351,16 @@ const Editor: FC<Props> = ({
                       noWrapper
                       isExpand={isExpand}
                       className={inputClassName}
+                      onBlur={onBlur}
+                      onFocus={onFocus}
                     />
                   </div>
                 )}
+            {!!footer && (
+              <div className="px-1 pt-2">
+                {footer}
+              </div>
+            )}
           </div>
         </div>
       </div>

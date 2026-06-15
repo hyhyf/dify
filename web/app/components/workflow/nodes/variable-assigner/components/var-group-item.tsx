@@ -11,7 +11,7 @@ import * as React from 'react'
 import { useCallback } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Folder } from '@/app/components/base/icons/src/vender/line/files'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import Field from '@/app/components/workflow/nodes/_base/components/field'
 import { VarType as VarKindType } from '@/app/components/workflow/nodes/tool/types'
 import { VarType } from '@/app/components/workflow/types'
@@ -94,10 +94,7 @@ const VarGroupItem: FC<Props> = ({
     const value = e.target.value
     const { isValid, errorKey, errorMessageKey } = checkKeys([value], false)
     if (!isValid) {
-      Toast.notify({
-        type: 'error',
-        message: t(`varKeyError.${errorMessageKey}`, { ns: 'appDebug', key: errorKey }),
-      })
+      toast.error(t(`varKeyError.${errorMessageKey}`, { ns: 'appDebug', key: errorKey }))
       return
     }
     onGroupNameChange?.(value)
@@ -113,7 +110,7 @@ const VarGroupItem: FC<Props> = ({
                 <Folder className="mr-0.5 h-3.5 w-3.5" />
                 {(!isEditGroupName)
                   ? (
-                      <div className="system-sm-semibold flex h-6 cursor-text items-center rounded-lg px-1 text-text-secondary hover:bg-gray-100" onClick={setEditGroupName}>
+                      <div className="flex h-6 cursor-text items-center rounded-lg px-1 text-text-secondary system-sm-semibold hover:bg-gray-100" onClick={setEditGroupName}>
                         {payload.group_name}
                       </div>
                     )
@@ -148,9 +145,9 @@ const VarGroupItem: FC<Props> = ({
           )
         : t(`${i18nPrefix}.title`, { ns: 'workflow' })!}
       operations={(
-        <div className="flex h-6 items-center  space-x-2">
+        <div className="flex h-6 items-center space-x-2">
           {payload.variables.length > 0 && (
-            <div className="system-2xs-medium-uppercase flex h-[18px] items-center rounded-[5px] border border-divider-deep px-1 text-text-tertiary">{payload.output_type}</div>
+            <div className="flex h-[18px] items-center rounded-[5px] border border-divider-deep px-1 text-text-tertiary system-2xs-medium-uppercase">{payload.output_type}</div>
           )}
           {
             !readOnly

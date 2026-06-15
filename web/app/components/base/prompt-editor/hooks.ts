@@ -84,7 +84,6 @@ export const useSelectOrDelete: UseSelectOrDeleteHandler = (nodeKey: string, com
 
   useEffect(() => {
     const ele = ref.current
-
     if (ele)
       ele.addEventListener('click', handleSelect)
 
@@ -155,14 +154,13 @@ export type TriggerFn = (
   text: string,
   editor: LexicalEditor,
 ) => MenuTextMatch | null
-export const PUNCTUATION = '\\.,\\+\\*\\?\\$\\@\\|#{}\\(\\)\\^\\-\\[\\]\\\\/!%\'"~=<>_:;'
 export function useBasicTypeaheadTriggerMatch(
   trigger: string,
   { minLength = 1, maxLength = 75 }: { minLength?: number, maxLength?: number },
 ): TriggerFn {
   return useCallback(
     (text: string) => {
-      const validChars = `[${PUNCTUATION}\\s]`
+      const validChars = '[^\\n]'
       const TypeaheadTriggerRegex = new RegExp(
         '(.*)('
         + `[${trigger}]`

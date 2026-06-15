@@ -1,9 +1,9 @@
+import type { ReactNode } from 'react'
 import type {
   PluginDefaultValue,
   TriggerDefaultValue,
 } from '@/app/components/workflow/block-selector/types'
 import type { EnvironmentVariable } from '@/app/components/workflow/types'
-import dynamic from 'next/dynamic'
 import {
   memo,
   useCallback,
@@ -21,6 +21,7 @@ import { useStore } from '@/app/components/workflow/store'
 import { BlockEnum } from '@/app/components/workflow/types'
 import { generateNewNode } from '@/app/components/workflow/utils'
 import { useEventEmitterContextContext } from '@/context/event-emitter'
+import dynamic from '@/next/dynamic'
 import PluginDependency from '../../workflow/plugin-dependency'
 import { useAvailableNodesMetaData } from '../hooks'
 import { useAutoOnboarding } from '../hooks/use-auto-onboarding'
@@ -65,9 +66,14 @@ const getTriggerPluginNodeData = (
   }
 }
 
-const WorkflowChildren = () => {
+type WorkflowChildrenProps = {
+  headerLeftSlot?: ReactNode
+}
+
+const WorkflowChildren = ({ headerLeftSlot }: WorkflowChildrenProps) => {
   const { eventEmitter } = useEventEmitterContextContext()
   const [secretEnvList, setSecretEnvList] = useState<EnvironmentVariable[]>([])
+  const [exportSandboxed, setExportSandboxed] = useState(false)
   const showFeaturesPanel = useStore(s => s.showFeaturesPanel)
   const showImportDSLModal = useStore(s => s.showImportDSLModal)
   const setShowImportDSLModal = useStore(s => s.setShowImportDSLModal)
@@ -88,8 +94,10 @@ const WorkflowChildren = () => {
   } = useDSL()
 
   eventEmitter?.useSubscription((v: any) => {
-    if (v.type === DSL_EXPORT_CHECK)
+    if (v.type === DSL_EXPORT_CHECK) {
       setSecretEnvList(v.payload.data as EnvironmentVariable[])
+      setExportSandboxed(v.payload.sandboxed || false)
+    }
   })
 
   const autoGenerateWebhookUrl = useAutoGenerateWebhookUrl()
@@ -147,7 +155,6 @@ const WorkflowChildren = () => {
     handleSyncWorkflowDraft(true, false, {
       onSuccess: () => {
         autoGenerateWebhookUrl(newNode.id)
-        console.log('Node successfully saved to draft')
       },
       onError: () => {
         console.error('Failed to save node to draft')
@@ -183,12 +190,12 @@ const WorkflowChildren = () => {
         secretEnvList.length > 0 && (
           <DSLExportConfirmModal
             envList={secretEnvList}
-            onConfirm={handleExportDSL!}
+            onConfirm={include => handleExportDSL!(include, undefined, exportSandboxed)}
             onClose={() => setSecretEnvList([])}
           />
         )
       }
-      <WorkflowHeader />
+      <WorkflowHeader leftSlot={headerLeftSlot} />
       <WorkflowPanel />
     </>
   )

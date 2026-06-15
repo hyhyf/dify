@@ -1,22 +1,31 @@
 'use client'
 
+import type { InitialConfigType } from '@lexical/react/LexicalComposer'
 import type {
   EditorState,
+  LexicalCommand,
 } from 'lexical'
 import type { FC } from 'react'
+import type { Hotkey } from './plugins/shortcuts-popup-plugin'
 import type {
+  AgentBlockType,
   ContextBlockType,
   CurrentBlockType,
   ErrorMessageBlockType,
   ExternalToolBlockType,
   HistoryBlockType,
+  HITLInputBlockType,
   LastRunBlockType,
   QueryBlockType,
+  RequestURLBlockType,
   VariableBlockType,
   WorkflowVariableBlockType,
 } from './types'
+import type { Node as WorkflowNode } from '@/app/components/workflow/types'
+import type { EventPayload } from '@/context/event-emitter'
 import { CodeNode } from '@lexical/code'
 import { LexicalComposer } from '@lexical/react/LexicalComposer'
+import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { ContentEditable } from '@lexical/react/LexicalContentEditable'
 import { LexicalErrorBoundary } from '@lexical/react/LexicalErrorBoundary'
 import { HistoryPlugin } from '@lexical/react/LexicalHistoryPlugin'
@@ -24,16 +33,34 @@ import { OnChangePlugin } from '@lexical/react/LexicalOnChangePlugin'
 import { RichTextPlugin } from '@lexical/react/LexicalRichTextPlugin'
 import {
   $getRoot,
+  COMMAND_PRIORITY_LOW,
+  KEY_ENTER_COMMAND,
   TextNode,
 } from 'lexical'
 import * as React from 'react'
-import { useEffect } from 'react'
+import { useCallback, useEffect, useState } from 'react'
+import { WorkflowContext } from '@/app/components/workflow/context'
+import { HooksStoreContext } from '@/app/components/workflow/hooks-store/provider'
+import { FileReferenceNode } from '@/app/components/workflow/skill/editor/skill-editor/plugins/file-reference-block/node'
+import { FilePreviewContextProvider } from '@/app/components/workflow/skill/editor/skill-editor/plugins/file-reference-block/preview-context'
+import FileReferenceReplacementBlock from '@/app/components/workflow/skill/editor/skill-editor/plugins/file-reference-block/replacement-block'
+import {
+  ToolBlock,
+  ToolBlockNode,
+  ToolBlockReplacementBlock,
+  ToolGroupBlockNode,
+  ToolGroupBlockReplacementBlock,
+} from '@/app/components/workflow/skill/editor/skill-editor/plugins/tool-block'
+import { ToolBlockContextProvider } from '@/app/components/workflow/skill/editor/skill-editor/plugins/tool-block/tool-block-context'
+import ToolPickerBlock from '@/app/components/workflow/skill/editor/skill-editor/plugins/tool-block/tool-picker-block'
 import { useEventEmitterContextContext } from '@/context/event-emitter'
 import { cn } from '@/utils/classnames'
+import { useWorkflow } from '../../workflow/hooks'
 import {
   UPDATE_DATASETS_EVENT_EMITTER,
   UPDATE_HISTORY_EVENT_EMITTER,
 } from './constants'
+
 import ComponentPickerBlock from './plugins/component-picker-block'
 import {
   ContextBlock,
@@ -46,17 +73,22 @@ import {
   CurrentBlockReplacementBlock,
 } from './plugins/current-block'
 import { CustomTextNode } from './plugins/custom-text/node'
+import DraggableBlockPlugin from './plugins/draggable-plugin'
 import {
   ErrorMessageBlock,
   ErrorMessageBlockNode,
   ErrorMessageBlockReplacementBlock,
 } from './plugins/error-message-block'
-
 import {
   HistoryBlock,
   HistoryBlockNode,
   HistoryBlockReplacementBlock,
 } from './plugins/history-block'
+import {
+  HITLInputBlock,
+  HITLInputBlockReplacementBlock,
+  HITLInputNode,
+} from './plugins/hitl-input-block'
 import {
   LastRunBlock,
   LastRunBlockNode,
@@ -70,6 +102,12 @@ import {
   QueryBlockNode,
   QueryBlockReplacementBlock,
 } from './plugins/query-block'
+import {
+  RequestURLBlock,
+  RequestURLBlockNode,
+  RequestURLBlockReplacementBlock,
+} from './plugins/request-url-block'
+import ShortcutsPopupPlugin from './plugins/shortcuts-popup-plugin'
 import UpdateBlock from './plugins/update-block'
 import VariableBlock from './plugins/variable-block'
 import VariableValueBlock from './plugins/variable-value-block'
@@ -79,10 +117,89 @@ import {
   WorkflowVariableBlockNode,
   WorkflowVariableBlockReplacementBlock,
 } from './plugins/workflow-variable-block'
+import SandboxPlaceholder from './sandbox-placeholder'
 import { textToEditorState } from './utils'
+
+const ValueSyncPlugin: FC<{ value?: string }> = ({ value }) => {
+  const [editor] = useLexicalComposerContext()
+
+  useEffect(() => {
+    if (value === undefined)
+      return
+
+    const incomingValue = value ?? ''
+    const shouldUpdate = editor.getEditorState().read(() => {
+      const currentText = $getRoot().getChildren().map(node => node.getTextContent()).join('\n')
+      return currentText !== incomingValue
+    })
+
+    if (!shouldUpdate)
+      return
+
+    const editorState = editor.parseEditorState(textToEditorState(incomingValue))
+    editor.setEditorState(editorState)
+    editor.update(() => {
+      $getRoot().getAllTextNodes().forEach((node) => {
+        if (node instanceof CustomTextNode)
+          node.markDirty()
+      })
+    })
+  }, [editor, value])
+
+  return null
+}
+
+const EnterCommandPlugin: FC<{ onEnter?: (event: KeyboardEvent) => void }> = ({ onEnter }) => {
+  const [editor] = useLexicalComposerContext()
+
+  useEffect(() => {
+    if (!onEnter)
+      return
+    return editor.registerCommand(
+      KEY_ENTER_COMMAND,
+      (event: KeyboardEvent) => {
+        if (!event || event.defaultPrevented)
+          return false
+        if (event.isComposing || event.shiftKey)
+          return false
+        event.preventDefault()
+        onEnter(event)
+        return true
+      },
+      COMMAND_PRIORITY_LOW,
+    )
+  }, [editor, onEnter])
+
+  return null
+}
+
+type WorkflowAvailableNodesProps = {
+  nodeId?: string
+  isSupportSandbox?: boolean
+  children: (availableNodes: WorkflowNode[]) => React.ReactNode
+}
+
+const WorkflowAvailableNodes: FC<WorkflowAvailableNodesProps> = ({
+  nodeId,
+  isSupportSandbox,
+  children,
+}) => {
+  const { getBeforeNodesInSameBranch } = useWorkflow()
+  const availableNodes = React.useMemo(
+    () => nodeId && isSupportSandbox ? getBeforeNodesInSameBranch(nodeId || '') : [],
+    [getBeforeNodesInSameBranch, isSupportSandbox, nodeId],
+  )
+
+  return (
+    <>
+      {children(availableNodes)}
+    </>
+  )
+}
 
 export type PromptEditorProps = {
   instanceId?: string
+  nodeId?: string
   compact?: boolean
   wrapperClassName?: string
   className?: string
@@ -94,20 +211,34 @@ export type PromptEditorProps = {
   onChange?: (text: string) => void
   onBlur?: () => void
   onFocus?: () => void
+  toolMetadata?: Record<string, unknown>
+  onToolMetadataChange?: (metadata: Record<string, unknown>) => void
   contextBlock?: ContextBlockType
   queryBlock?: QueryBlockType
+  requestURLBlock?: RequestURLBlockType
   historyBlock?: HistoryBlockType
   variableBlock?: VariableBlockType
   externalToolBlock?: ExternalToolBlockType
   workflowVariableBlock?: WorkflowVariableBlockType
+  hitlInputBlock?: HITLInputBlockType
   currentBlock?: CurrentBlockType
   errorMessageBlock?: ErrorMessageBlockType
   lastRunBlock?: LastRunBlockType
+  agentBlock?: AgentBlockType
   isSupportFileVar?: boolean
+  isSupportSandbox?: boolean
+  disableToolBlocks?: boolean
+  onEnter?: (event: KeyboardEvent) => void
+  shortcutPopups?: Array<{ hotkey: Hotkey, Popup: React.ComponentType<{ onClose: () => void, onInsert: (command: LexicalCommand<unknown>, params: unknown[]) => void }> }>
 }
 
-const PromptEditor: FC<PromptEditorProps> = ({
+type PromptEditorContentProps = PromptEditorProps & {
+  availableNodes: WorkflowNode[]
+}
+
+const PromptEditorContent: FC<PromptEditorContentProps> = ({
   instanceId,
+  nodeId,
   compact,
   wrapperClassName,
   className,
@@ -119,19 +250,32 @@ const PromptEditor: FC<PromptEditorProps> = ({
   onChange,
   onBlur,
   onFocus,
+  toolMetadata,
+  onToolMetadataChange,
   contextBlock,
   queryBlock,
+  requestURLBlock,
   historyBlock,
   variableBlock,
   externalToolBlock,
   workflowVariableBlock,
+  hitlInputBlock,
   currentBlock,
   errorMessageBlock,
   lastRunBlock,
+  agentBlock,
   isSupportFileVar,
+  isSupportSandbox,
+  disableToolBlocks,
+  onEnter,
+  shortcutPopups = [],
+  availableNodes,
 }) => {
   const { eventEmitter } = useEventEmitterContextContext()
-  const initialConfig = {
+  const initialConfig: InitialConfigType = {
+    theme: {
+      paragraph: 'group-[.clamp]:line-clamp-5 group-focus/editable:!line-clamp-none',
+    },
     namespace: 'prompt-editor',
     nodes: [
       CodeNode,
@@ -139,15 +283,19 @@ const PromptEditor: FC<PromptEditorProps> = ({
       {
         replace: TextNode,
         with: (node: TextNode) => new CustomTextNode(node.__text),
+        withKlass: CustomTextNode,
       },
       ContextBlockNode,
       HistoryBlockNode,
       QueryBlockNode,
+      RequestURLBlockNode,
       WorkflowVariableBlockNode,
       VariableValueBlockNode,
+      HITLInputNode,
       CurrentBlockNode,
       ErrorMessageBlockNode,
       LastRunBlockNode, // LastRunBlockNode is used for error message block replacement
+      ...(isSupportSandbox ? [FileReferenceNode, ToolGroupBlockNode, ToolBlockNode] : []),
     ],
     editorState: textToEditorState(value || ''),
     onError: (error: Error) => {
@@ -167,140 +315,265 @@ const PromptEditor: FC<PromptEditorProps> = ({
     eventEmitter?.emit({
       type: UPDATE_DATASETS_EVENT_EMITTER,
       payload: contextBlock?.datasets,
-    } as any)
+    } as EventPayload)
   }, [eventEmitter, contextBlock?.datasets])
   useEffect(() => {
     eventEmitter?.emit({
       type: UPDATE_HISTORY_EVENT_EMITTER,
       payload: historyBlock?.history,
-    } as any)
+    } as EventPayload)
   }, [eventEmitter, historyBlock?.history])
+
+  const toolBlockContextValue = React.useMemo(() => {
+    if (!onToolMetadataChange)
+      return null
+    return {
+      metadata: toolMetadata,
+      onMetadataChange: onToolMetadataChange,
+      useModal: true,
+      disableToolBlocks,
+      nodeId,
+      nodesOutputVars: workflowVariableBlock?.variables,
+      availableNodes,
+    }
+  }, [availableNodes, disableToolBlocks, nodeId, onToolMetadataChange, toolMetadata, workflowVariableBlock?.variables])
+
+  const filePreviewContextValue = React.useMemo(() => ({
+    enabled: Boolean(isSupportSandbox),
+  }), [isSupportSandbox])
+
+  const [floatingAnchorElem, setFloatingAnchorElem] = useState<HTMLDivElement | null>(null)
+
+  const onRef = useCallback((floatingAnchorElement: HTMLDivElement | null) => {
+    if (floatingAnchorElement === null)
+      return
+
+    setFloatingAnchorElem(prev => prev === floatingAnchorElement ? prev : floatingAnchorElement)
+  }, [])
 
   return (
     <LexicalComposer initialConfig={{ ...initialConfig, editable }}>
-      <div className={cn('relative', wrapperClassName)}>
-        <RichTextPlugin
-          contentEditable={(
-            <ContentEditable
-              className={cn(
-                'text-text-secondary outline-none',
-                compact ? 'text-[13px] leading-5' : 'text-sm leading-6',
-                className,
+      <ToolBlockContextProvider value={toolBlockContextValue}>
+        <FilePreviewContextProvider value={filePreviewContextValue}>
+          <div
+            className={cn('relative', wrapperClassName)}
+            data-skill-editor-root={isSupportSandbox ? 'true' : undefined}
+            ref={onRef}
+          >
+            <RichTextPlugin
+              contentEditable={(
+                <ContentEditable
+                  className={cn(
+                    'group/editable text-text-secondary outline-none group-[.clamp]:max-h-24 group-[.clamp]:overflow-y-auto',
+                    compact ? 'text-[13px] leading-5' : 'text-sm leading-6',
+                    className,
+                  )}
+                  style={style || {}}
+                />
               )}
-              style={style || {}}
+              placeholder={(
+                <Placeholder
+                  value={placeholder || (
+                    <SandboxPlaceholder
+                      editable={editable}
+                      disableToolBlocks={disableToolBlocks}
+                      isSupportSandbox={isSupportSandbox}
+                    />
+                  )}
+                  className={cn('truncate', placeholderClassName)}
+                  compact={compact}
+                />
+              )}
+              ErrorBoundary={LexicalErrorBoundary}
             />
-          )}
-          placeholder={(
-            <Placeholder
-              value={placeholder}
-              className={cn('truncate', placeholderClassName)}
-              compact={compact}
+            {shortcutPopups?.map(({ hotkey, Popup }, idx) => (
+              <ShortcutsPopupPlugin key={idx} hotkey={hotkey}>
+                {(closePortal, onInsert) => <Popup onClose={closePortal} onInsert={onInsert} />}
+              </ShortcutsPopupPlugin>
+            ))}
+            <ComponentPickerBlock
+              triggerString="/"
+              contextBlock={contextBlock}
+              historyBlock={historyBlock}
+              queryBlock={queryBlock}
+              requestURLBlock={requestURLBlock}
+              variableBlock={variableBlock}
+              externalToolBlock={externalToolBlock}
+              workflowVariableBlock={workflowVariableBlock}
+              currentBlock={currentBlock}
+              errorMessageBlock={errorMessageBlock}
+              lastRunBlock={lastRunBlock}
+              isSupportFileVar={isSupportFileVar}
+              isSupportSandbox={isSupportSandbox}
             />
-          )}
-          ErrorBoundary={LexicalErrorBoundary}
-        />
-        <ComponentPickerBlock
-          triggerString="/"
-          contextBlock={contextBlock}
-          historyBlock={historyBlock}
-          queryBlock={queryBlock}
-          variableBlock={variableBlock}
-          externalToolBlock={externalToolBlock}
-          workflowVariableBlock={workflowVariableBlock}
-          currentBlock={currentBlock}
-          errorMessageBlock={errorMessageBlock}
-          lastRunBlock={lastRunBlock}
-          isSupportFileVar={isSupportFileVar}
-        />
-        <ComponentPickerBlock
-          triggerString="{"
-          contextBlock={contextBlock}
-          historyBlock={historyBlock}
-          queryBlock={queryBlock}
-          variableBlock={variableBlock}
-          externalToolBlock={externalToolBlock}
-          workflowVariableBlock={workflowVariableBlock}
-          currentBlock={currentBlock}
-          errorMessageBlock={errorMessageBlock}
-          lastRunBlock={lastRunBlock}
-          isSupportFileVar={isSupportFileVar}
-        />
-        {
-          contextBlock?.show && (
-            <>
-              <ContextBlock {...contextBlock} />
-              <ContextBlockReplacementBlock {...contextBlock} />
-            </>
-          )
-        }
-        {
-          queryBlock?.show && (
-            <>
-              <QueryBlock {...queryBlock} />
-              <QueryBlockReplacementBlock />
-            </>
-          )
-        }
-        {
-          historyBlock?.show && (
-            <>
-              <HistoryBlock {...historyBlock} />
-              <HistoryBlockReplacementBlock {...historyBlock} />
-            </>
-          )
-        }
-        {
-          (variableBlock?.show || externalToolBlock?.show) && (
-            <>
-              <VariableBlock />
-              <VariableValueBlock />
-            </>
-          )
-        }
-        {
-          workflowVariableBlock?.show && (
-            <>
-              <WorkflowVariableBlock {...workflowVariableBlock} />
-              <WorkflowVariableBlockReplacementBlock {...workflowVariableBlock} />
-            </>
-          )
-        }
-        {
-          currentBlock?.show && (
-            <>
-              <CurrentBlock {...currentBlock} />
-              <CurrentBlockReplacementBlock {...currentBlock} />
-            </>
-          )
-        }
-        {
-          errorMessageBlock?.show && (
-            <>
-              <ErrorMessageBlock {...errorMessageBlock} />
-              <ErrorMessageBlockReplacementBlock {...errorMessageBlock} />
-            </>
-          )
-        }
-        {
-          lastRunBlock?.show && (
-            <>
-              <LastRunBlock {...lastRunBlock} />
-              <LastRunReplacementBlock {...lastRunBlock} />
-            </>
-          )
-        }
-        {
-          isSupportFileVar && (
-            <VariableValueBlock />
-          )
-        }
-        <OnChangePlugin onChange={handleEditorChange} />
-        <OnBlurBlock onBlur={onBlur} onFocus={onFocus} />
-        <UpdateBlock instanceId={instanceId} />
-        <HistoryPlugin />
-        {/* <TreeView /> */}
-      </div>
+            {!isSupportSandbox && (!agentBlock || agentBlock.show) && (
+              <ComponentPickerBlock
+                triggerString="@"
+                contextBlock={contextBlock}
+                historyBlock={historyBlock}
+                queryBlock={queryBlock}
+                variableBlock={variableBlock}
+                externalToolBlock={externalToolBlock}
+                workflowVariableBlock={workflowVariableBlock}
+                currentBlock={currentBlock}
+                errorMessageBlock={errorMessageBlock}
+                lastRunBlock={lastRunBlock}
+                agentBlock={agentBlock}
+                isSupportFileVar={isSupportFileVar}
+              />
+            )}
+            {isSupportSandbox && (
+              <>
+                <ToolBlock />
+                <ToolGroupBlockReplacementBlock />
+                <ToolBlockReplacementBlock />
+                {editable && !disableToolBlocks && <ToolPickerBlock enableAutoDefault />}
+              </>
+            )}
+            <ComponentPickerBlock
+              triggerString="{"
+              contextBlock={contextBlock}
+              historyBlock={historyBlock}
+              queryBlock={queryBlock}
+              requestURLBlock={requestURLBlock}
+              variableBlock={variableBlock}
+              externalToolBlock={externalToolBlock}
+              workflowVariableBlock={workflowVariableBlock}
+              currentBlock={currentBlock}
+              errorMessageBlock={errorMessageBlock}
+              lastRunBlock={lastRunBlock}
+              isSupportFileVar={isSupportFileVar}
+              isSupportSandbox={isSupportSandbox}
+            />
+            {
+              contextBlock?.show && (
+                <>
+                  <ContextBlock {...contextBlock} />
+                  <ContextBlockReplacementBlock {...contextBlock} />
+                </>
+              )
+            }
+            {
+              queryBlock?.show && (
+                <>
+                  <QueryBlock {...queryBlock} />
+                  <QueryBlockReplacementBlock />
+                </>
+              )
+            }
+            {
+              historyBlock?.show && (
+                <>
+                  <HistoryBlock {...historyBlock} />
+                  <HistoryBlockReplacementBlock {...historyBlock} />
+                </>
+              )
+            }
+            {
+              (variableBlock?.show || externalToolBlock?.show) && (
+                <>
+                  <VariableBlock />
+                  <VariableValueBlock />
+                </>
+              )
+            }
+            {
+              workflowVariableBlock?.show && (
+                <>
+                  <WorkflowVariableBlock {...workflowVariableBlock} />
+                  <WorkflowVariableBlockReplacementBlock {...workflowVariableBlock} />
+                </>
+              )
+            }
+            {
+              hitlInputBlock?.show && (
+                <>
+                  <HITLInputBlock {...hitlInputBlock} />
+                  <HITLInputBlockReplacementBlock {...hitlInputBlock} />
+                </>
+              )
+            }
+            {isSupportSandbox && <FileReferenceReplacementBlock />}
+            {
+              currentBlock?.show && (
+                <>
+                  <CurrentBlock {...currentBlock} />
+                  <CurrentBlockReplacementBlock {...currentBlock} />
+                </>
+              )
+            }
+            {
+              requestURLBlock?.show && (
+                <>
+                  <RequestURLBlock {...requestURLBlock} />
+                  <RequestURLBlockReplacementBlock {...requestURLBlock} />
+                </>
+              )
+            }
+            {
+              errorMessageBlock?.show && (
+                <>
+                  <ErrorMessageBlock {...errorMessageBlock} />
+                  <ErrorMessageBlockReplacementBlock {...errorMessageBlock} />
+                </>
+              )
+            }
+            {
+              lastRunBlock?.show && (
+                <>
+                  <LastRunBlock {...lastRunBlock} />
+                  <LastRunReplacementBlock {...lastRunBlock} />
+                </>
+              )
+            }
+            {
+              isSupportFileVar && (
+                <VariableValueBlock />
+              )
+            }
+            <ValueSyncPlugin value={value} />
+            <OnChangePlugin onChange={handleEditorChange} />
+            <EnterCommandPlugin onEnter={onEnter} />
+            <OnBlurBlock onBlur={onBlur} onFocus={onFocus} />
+            <UpdateBlock instanceId={instanceId} />
+            <HistoryPlugin />
+            {floatingAnchorElem && (
+              <DraggableBlockPlugin anchorElem={floatingAnchorElem} />
+            )}
+            {/* <TreeView /> */}
+          </div>
+        </FilePreviewContextProvider>
+      </ToolBlockContextProvider>
     </LexicalComposer>
+  )
+}
+
+const PromptEditor: FC<PromptEditorProps> = (props) => {
+  const workflowStore = React.useContext(WorkflowContext)
+  const hooksStore = React.useContext(HooksStoreContext)
+  const hasWorkflowContext = Boolean(workflowStore && hooksStore)
+
+  if (!hasWorkflowContext) {
+    return (
+      <PromptEditorContent
+        {...props}
+        availableNodes={[]}
+      />
+    )
+  }
+
+  return (
+    <WorkflowAvailableNodes
+      nodeId={props.nodeId}
+      isSupportSandbox={props.isSupportSandbox}
+    >
+      {availableNodes => (
+        <PromptEditorContent
+          {...props}
+          availableNodes={availableNodes}
+        />
+      )}
+    </WorkflowAvailableNodes>
   )
 }
 

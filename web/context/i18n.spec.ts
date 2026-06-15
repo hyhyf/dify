@@ -184,8 +184,8 @@ describe('useDocLink', () => {
       vi.mocked(getDocLanguage).mockReturnValue('ja')
 
       const { result } = renderHook(() => useDocLink())
-      const url = result.current('/api-reference/application/get-application-basic-information')
-      expect(url).toBe(`${defaultDocBaseUrl}/api-reference/アプリケーション情報/アプリケーションの基本情報を取得`)
+      const url = result.current('/api-reference/applications/get-app-info')
+      expect(url).toBe(`${defaultDocBaseUrl}/api-reference/アプリケーション設定/アプリケーションの基本情報を取得`)
     })
 
     it('should not translate API reference path for English locale', () => {
@@ -196,19 +196,19 @@ describe('useDocLink', () => {
 
       const { result } = renderHook(() => useDocLink())
       const url = result.current('/api-reference/annotations/create-annotation')
-      expect(url).toBe(`${defaultDocBaseUrl}/en/api-reference/annotations/create-annotation`)
+      expect(url).toBe(`${defaultDocBaseUrl}/api-reference/annotations/create-annotation`)
     })
 
     it('should keep original path when no translation exists for non-English locale', () => {
       vi.mocked(useTranslation).mockReturnValue({
-        i18n: { language: 'ja-JP' },
+        i18n: { language: 'zh-Hans' },
       } as ReturnType<typeof useTranslation>)
-      vi.mocked(getDocLanguage).mockReturnValue('ja')
+      vi.mocked(getDocLanguage).mockReturnValue('zh')
 
       const { result } = renderHook(() => useDocLink())
       // This path has no Japanese translation
       const url = result.current('/api-reference/annotations/create-annotation')
-      expect(url).toBe(`${defaultDocBaseUrl}/ja/api-reference/annotations/create-annotation`)
+      expect(url).toBe(`${defaultDocBaseUrl}/api-reference/标注管理/创建标注`)
     })
 
     it('should remove language prefix when translation is applied', () => {
@@ -241,6 +241,24 @@ describe('useDocLink', () => {
       const { result } = renderHook(() => useDocLink())
       const url = result.current('/use-dify/getting-started/introduction#overview' as DocPathWithoutLang)
       expect(url).toBe(`${defaultDocBaseUrl}/en/use-dify/getting-started/introduction#overview`)
+    })
+
+    it('should support locale-specific anchors via pathMap', () => {
+      vi.mocked(useTranslation).mockReturnValue({
+        i18n: { language: 'zh-Hans' },
+      } as ReturnType<typeof useTranslation>)
+      vi.mocked(getDocLanguage).mockReturnValue('zh')
+
+      const pathMap: DocPathMap = {
+        'zh-Hans': '/use-dify/workspace/app-management#应用导出和导入' as DocPathWithoutLang,
+        'zh_Hans': '/use-dify/workspace/app-management#应用导出和导入' as DocPathWithoutLang,
+        'ja-JP': '/use-dify/workspace/app-management#アプリのエクスポートとインポート' as DocPathWithoutLang,
+        'ja_JP': '/use-dify/workspace/app-management#アプリのエクスポートとインポート' as DocPathWithoutLang,
+      }
+
+      const { result } = renderHook(() => useDocLink())
+      const url = result.current('/use-dify/workspace/app-management#app-export-and-import', pathMap)
+      expect(url).toBe(`${defaultDocBaseUrl}/zh/use-dify/workspace/app-management#应用导出和导入`)
     })
 
     it('should handle multiple calls with same hook instance', () => {

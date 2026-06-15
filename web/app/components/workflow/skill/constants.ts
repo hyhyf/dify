@@ -1,0 +1,39 @@
+/**
+ * File Tree Constants - Single source of truth for root/blank identifiers
+ */
+
+// Root folder identifier (convert to null for API calls via toApiParentId)
+export const ROOT_ID = 'root' as const
+
+// Start tab identifier - a special tab that is always present
+export const START_TAB_ID = '__start__' as const
+
+// Drag type identifier for internal tree node dragging
+export const INTERNAL_NODE_DRAG_TYPE = 'application/x-dify-tree-node'
+
+// Node menu types (determines which menu options to show)
+export const NODE_MENU_TYPE = {
+  ROOT: 'root',
+  FOLDER: 'folder',
+  FILE: 'file',
+} as const
+
+export type NodeMenuType = (typeof NODE_MENU_TYPE)[keyof typeof NODE_MENU_TYPE]
+
+export const ARTIFACT_TAB_PREFIX = 'artifact:' as const
+
+export function isArtifactTab(tabId: string | null): boolean {
+  return tabId?.startsWith(ARTIFACT_TAB_PREFIX) ?? false
+}
+
+export function getArtifactPath(tabId: string): string {
+  return tabId.slice(ARTIFACT_TAB_PREFIX.length)
+}
+
+export function makeArtifactTabId(path: string): string {
+  return `${ARTIFACT_TAB_PREFIX}${path}`
+}
+
+export const SIDEBAR_MIN_WIDTH = 240
+export const SIDEBAR_MAX_WIDTH = 480
+export const SIDEBAR_DEFAULT_WIDTH = 320

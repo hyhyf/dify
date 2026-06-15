@@ -2,6 +2,7 @@ import type { Viewport } from 'reactflow'
 import type { Metadata } from '@/app/components/base/chat/chat/type'
 import type {
   Edge,
+  JsonValue,
   Node,
 } from '@/app/components/workflow/types'
 import type { VisionFile } from '@/types/app'
@@ -93,7 +94,7 @@ export type MessageContent = {
 
 export type CompletionConversationGeneralDetail = {
   id: string
-  status: 'normal' | 'finished'
+  status: 'normal' | 'finished' | 'paused'
   from_source: 'api' | 'console'
   from_end_user_id: string
   from_end_user_session_id: string
@@ -297,7 +298,8 @@ export type WorkflowRunDetailResponse = {
   inputs: string
   inputs_truncated: boolean
   status: 'running' | 'succeeded' | 'failed' | 'stopped'
-  outputs?: string
+  outputs?: Record<string, JsonValue>
+  outputs_as_generation?: boolean
   outputs_truncated: boolean
   outputs_full_content?: {
     download_url: string
@@ -366,4 +368,23 @@ export type AgentLogDetailResponse = {
   meta: AgentLogMeta
   iterations: AgentIteration[]
   files: AgentLogFile[]
+}
+
+export type PauseType = {
+  type: 'human_input'
+  form_id: string
+  backstage_input_url: string
+} | {
+  type: 'breakpoint'
+}
+
+export type PauseDetail = {
+  node_id: string
+  node_title: string
+  pause_type: PauseType
+}
+
+export type WorkflowPausedDetailsResponse = {
+  paused_at: string
+  paused_nodes: PauseDetail[]
 }

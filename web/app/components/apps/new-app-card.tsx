@@ -1,10 +1,5 @@
 'use client'
 
-import dynamic from 'next/dynamic'
-import {
-  useRouter,
-  useSearchParams,
-} from 'next/navigation'
 import * as React from 'react'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,6 +8,11 @@ import { CreateFromDSLModalTab } from '@/app/components/app/create-from-dsl-moda
 import { FileArrow01, FilePlus01, FilePlus02 } from '@/app/components/base/icons/src/vender/line/files'
 import AppListContext from '@/context/app-list-context'
 import { useProviderContext } from '@/context/provider-context'
+import dynamic from '@/next/dynamic'
+import {
+  useRouter,
+  useSearchParams,
+} from '@/next/navigation'
 import { cn } from '@/utils/classnames'
 
 const CreateAppModal = dynamic(() => import('@/app/components/app/create-app-modal'), {
@@ -89,7 +89,7 @@ const CreateAppCard = ({
           className="flex w-full cursor-pointer items-center rounded-lg px-6 py-[7px] text-[13px] font-medium leading-[18px] text-text-tertiary hover:bg-state-base-hover hover:text-text-secondary"
         >
           <FileArrow01 className="mr-2 h-4 w-4 shrink-0" />
-          {t('importDSL', { ns: 'app' })}
+          {t('importApp', { ns: 'app' })}
         </button>
       </div>
 

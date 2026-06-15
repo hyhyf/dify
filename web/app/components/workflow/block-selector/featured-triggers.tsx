@@ -3,15 +3,15 @@ import type { TriggerDefaultValue, TriggerWithProvider } from './types'
 import type { Plugin } from '@/app/components/plugins/types'
 import type { Locale } from '@/i18n-config'
 import { RiMoreLine } from '@remixicon/react'
-import Link from 'next/link'
 import { useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { ArrowDownDoubleLine, ArrowDownRoundFill, ArrowUpDoubleLine } from '@/app/components/base/icons/src/vender/solid/arrows'
 import Loading from '@/app/components/base/loading'
-import Tooltip from '@/app/components/base/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/base/ui/popover'
 import InstallFromMarketplace from '@/app/components/plugins/install-plugin/install-from-marketplace'
 import Action from '@/app/components/workflow/block-selector/market-place-plugin/action'
 import { useGetLanguage } from '@/context/i18n'
+import Link from '@/next/link'
 import { isServer } from '@/utils/client'
 import { formatNumber } from '@/utils/format'
 import { getMarketplaceUrl } from '@/utils/var'
@@ -127,7 +127,7 @@ const FeaturedTriggers = ({
         className="flex w-full items-center rounded-md px-0 py-1 text-left text-text-primary"
         onClick={() => setIsCollapsed(prev => !prev)}
       >
-        <span className="system-xs-medium text-text-primary">{t('tabs.featuredTools', { ns: 'workflow' })}</span>
+        <span className="text-text-primary system-xs-medium">{t('tabs.featuredTools', { ns: 'workflow' })}</span>
         <ArrowDownRoundFill className={`ml-0.5 h-4 w-4 text-text-tertiary transition-transform ${isCollapsed ? '-rotate-90' : 'rotate-0'}`} />
       </button>
 
@@ -140,7 +140,7 @@ const FeaturedTriggers = ({
           )}
 
           {showEmptyState && (
-            <p className="system-xs-regular py-2 text-text-tertiary">
+            <p className="py-2 text-text-tertiary system-xs-regular">
               <Link className="text-text-accent" href={getMarketplaceUrl('', { category: 'trigger' })} target="_blank" rel="noopener noreferrer">
                 {t('tabs.noFeaturedTriggers', { ns: 'workflow' })}
               </Link>
@@ -251,63 +251,69 @@ function FeaturedTriggerUninstalledItem({
 
   return (
     <>
-      <Tooltip
-        position="right"
-        needsDelay={false}
-        popupClassName="!p-0 !px-3 !py-2.5 !w-[224px] !leading-[18px] !text-xs !text-gray-700 !border-[0.5px] !border-black/5 !rounded-xl !shadow-lg"
-        popupContent={(
+      <Popover>
+        <PopoverTrigger
+          openOnHover
+          nativeButton={false}
+          disabled={!description || isActionHovered || actionOpen || isInstallModalOpen}
+          render={(
+            <div
+              className="group flex h-8 w-full items-center rounded-lg pl-3 pr-1 hover:bg-state-base-hover"
+            >
+              <div className="flex h-full min-w-0 items-center">
+                <BlockIcon type={BlockEnum.TriggerPlugin} toolIcon={plugin.icon} />
+                <div className="ml-2 min-w-0">
+                  <div className="truncate text-text-secondary system-sm-medium">{label}</div>
+                </div>
+              </div>
+              <div className="ml-auto inline-grid h-full shrink-0 items-center pl-1">
+                <span
+                  className={`col-start-1 row-start-1 text-text-tertiary system-xs-regular ${actionOpen || isActionHovered ? 'invisible' : 'group-hover:invisible'}`}
+                >
+                  {installCountLabel}
+                </span>
+                <div
+                  className={`col-start-1 row-start-1 flex h-full items-center gap-1 justify-self-end text-components-button-secondary-accent-text system-xs-medium [&_.action-btn]:h-6 [&_.action-btn]:min-h-0 [&_.action-btn]:w-6 [&_.action-btn]:rounded-lg [&_.action-btn]:p-0 ${actionOpen || isActionHovered ? 'visible' : 'invisible group-hover:visible'}`}
+                  onMouseEnter={() => setIsActionHovered(true)}
+                  onMouseLeave={() => {
+                    if (!actionOpen)
+                      setIsActionHovered(false)
+                  }}
+                >
+                  <button
+                    type="button"
+                    className="cursor-pointer rounded-md px-1.5 py-0.5 hover:bg-state-base-hover"
+                    onClick={() => {
+                      setActionOpen(false)
+                      setIsInstallModalOpen(true)
+                      setIsActionHovered(true)
+                    }}
+                  >
+                    {t('installAction', { ns: 'plugin' })}
+                  </button>
+                  <Action
+                    open={actionOpen}
+                    onOpenChange={(value) => {
+                      setActionOpen(value)
+                      setIsActionHovered(value)
+                    }}
+                    author={plugin.org}
+                    name={plugin.name}
+                    version={plugin.latest_version}
+                  />
+                </div>
+              </div>
+            </div>
+          )}
+        />
+        <PopoverContent placement="right" popupClassName="!w-[224px] !rounded-xl !border-[0.5px] !border-black/5 !p-0 !px-3 !py-2.5 !text-xs !leading-[18px] !text-gray-700 !shadow-lg">
           <div>
             <BlockIcon size="md" className="mb-2" type={BlockEnum.TriggerPlugin} toolIcon={plugin.icon} />
             <div className="mb-1 text-sm leading-5 text-text-primary">{label}</div>
             <div className="text-xs leading-[18px] text-text-secondary">{description}</div>
           </div>
-        )}
-        disabled={!description || isActionHovered || actionOpen || isInstallModalOpen}
-      >
-        <div
-          className="group flex h-8 w-full items-center rounded-lg pl-3 pr-1 hover:bg-state-base-hover"
-        >
-          <div className="flex h-full min-w-0 items-center">
-            <BlockIcon type={BlockEnum.TriggerPlugin} toolIcon={plugin.icon} />
-            <div className="ml-2 min-w-0">
-              <div className="system-sm-medium truncate text-text-secondary">{label}</div>
-            </div>
-          </div>
-          <div className="ml-auto flex h-full items-center gap-1 pl-1">
-            <span className={`system-xs-regular text-text-tertiary ${actionOpen ? 'hidden' : 'group-hover:hidden'}`}>{installCountLabel}</span>
-            <div
-              className={`system-xs-medium flex h-full items-center gap-1 text-components-button-secondary-accent-text [&_.action-btn]:h-6 [&_.action-btn]:min-h-0 [&_.action-btn]:w-6 [&_.action-btn]:rounded-lg [&_.action-btn]:p-0 ${actionOpen ? 'flex' : 'hidden group-hover:flex'}`}
-              onMouseEnter={() => setIsActionHovered(true)}
-              onMouseLeave={() => {
-                if (!actionOpen)
-                  setIsActionHovered(false)
-              }}
-            >
-              <button
-                type="button"
-                className="cursor-pointer rounded-md px-1.5 py-0.5 hover:bg-state-base-hover"
-                onClick={() => {
-                  setActionOpen(false)
-                  setIsInstallModalOpen(true)
-                  setIsActionHovered(true)
-                }}
-              >
-                {t('installAction', { ns: 'plugin' })}
-              </button>
-              <Action
-                open={actionOpen}
-                onOpenChange={(value) => {
-                  setActionOpen(value)
-                  setIsActionHovered(value)
-                }}
-                author={plugin.org}
-                name={plugin.name}
-                version={plugin.latest_version}
-              />
-            </div>
-          </div>
-        </div>
-      </Tooltip>
+        </PopoverContent>
+      </Popover>
       {isInstallModalOpen && (
         <InstallFromMarketplace
           uniqueIdentifier={plugin.latest_package_identifier}

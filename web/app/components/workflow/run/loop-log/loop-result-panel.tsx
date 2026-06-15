@@ -64,7 +64,7 @@ const LoopResultPanel: FC<Props> = ({
     return (
       <>
         {hasDurationMap && (
-          <div className="system-xs-regular text-text-tertiary">
+          <div className="text-text-tertiary system-xs-regular">
             {countLoopDuration(loop, loopDurationMap)}
           </div>
         )}
@@ -107,7 +107,7 @@ const LoopResultPanel: FC<Props> = ({
                 <div className="flex h-4 w-4 shrink-0 items-center justify-center rounded-[5px] border-divider-subtle bg-util-colors-cyan-cyan-500">
                   <Loop className="h-3 w-3 text-text-primary-on-surface" />
                 </div>
-                <span className="system-sm-semibold-uppercase grow text-text-primary">
+                <span className="grow text-text-primary system-sm-semibold-uppercase">
                   {t(`${i18nPrefix}.loop`, { ns: 'workflow' })}
                   {' '}
                   {index + 1}
@@ -129,14 +129,14 @@ const LoopResultPanel: FC<Props> = ({
             )}
             >
               {
-                loopVariableMap?.[index] && (
+                !!loopVariableMap?.[index] && (
                   <div className="p-2 pb-0">
                     <CodeEditor
                       readOnly
                       title={<div>{t('nodes.loop.loopVariables', { ns: 'workflow' }).toLocaleUpperCase()}</div>}
                       language={CodeLanguage.json}
                       height={112}
-                      value={loopVariableMap[index]}
+                      value={loopVariableMap[String(index)] as string | object}
                       isJSONStringifyBeauty
                     />
                   </div>

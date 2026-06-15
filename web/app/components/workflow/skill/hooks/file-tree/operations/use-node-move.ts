@@ -1,0 +1,42 @@
+'use client'
+
+import { useCallback } from 'react'
+// Internal tree node move handler - API execution logic only
+// Drag state syncing is handled by react-arborist + TreeNode useEffect
+
+import { useTranslation } from 'react-i18next'
+import { useStore as useAppStore } from '@/app/components/app/store'
+import { toast } from '@/app/components/base/ui/toast'
+import { useMoveAppAssetNode } from '@/service/use-app-asset'
+import { toApiParentId } from '../../../utils/tree-utils'
+import { useSkillTreeUpdateEmitter } from '../data/use-skill-tree-collaboration'
+
+export function useNodeMove() {
+  const { t } = useTranslation('workflow')
+  const appDetail = useAppStore(s => s.appDetail)
+  const appId = appDetail?.id || ''
+  const { mutateAsync: moveNodeAsync, isPending: isMoving } = useMoveAppAssetNode()
+  const emitTreeUpdate = useSkillTreeUpdateEmitter()
+
+  // Execute move API call - validation is handled by react-arborist's disableDrop callback
+  const executeMoveNode = useCallback(async (nodeId: string, targetFolderId: string | null) => {
+    try {
+      await moveNodeAsync({
+        appId,
+        nodeId,
+        payload: { parent_id: toApiParentId(targetFolderId) },
+      })
+
+      emitTreeUpdate()
+      toast.success(t('skillSidebar.menu.moved'))
+    }
+    catch {
+      toast.error(t('skillSidebar.menu.moveError'))
+    }
+  }, [appId, moveNodeAsync, t, emitTreeUpdate])
+
+  return {
+    executeMoveNode,
+    isMoving,
+  }
+}

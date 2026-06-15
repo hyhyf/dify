@@ -8,7 +8,7 @@ import { useAppForm } from '@/app/components/base/form'
 import BaseField from '@/app/components/base/form/form-scenarios/base/field'
 import { generateZodSchema } from '@/app/components/base/form/form-scenarios/base/utils'
 import { ArrowDownRoundFill } from '@/app/components/base/icons/src/vender/solid/general'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { useConfigurations, useInitialData } from '@/app/components/rag-pipeline/hooks/use-input-fields'
 import { CrawlStep } from '@/models/datasets'
 import { cn } from '@/utils/classnames'
@@ -44,10 +44,7 @@ const Options = ({
           const issues = result.error.issues
           const firstIssue = issues[0]
           const errorMessage = `"${firstIssue.path.join('.')}" ${firstIssue.message}`
-          Toast.notify({
-            type: 'error',
-            message: errorMessage,
-          })
+          toast.error(errorMessage)
           return errorMessage
         }
         return undefined
@@ -88,7 +85,7 @@ const Options = ({
           className="flex grow cursor-pointer select-none items-center gap-x-0.5"
           onClick={foldToggle}
         >
-          <span className="system-sm-semibold-uppercase text-text-secondary">
+          <span className="text-text-secondary system-sm-semibold-uppercase">
             {t(`${I18N_PREFIX}.options`, { ns: 'datasetCreation' })}
           </span>
           <ArrowDownRoundFill className={cn('h-4 w-4 shrink-0 text-text-quaternary', fold && '-rotate-90')} />

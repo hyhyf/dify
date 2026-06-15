@@ -1,0 +1,125 @@
+export type OpenTabOptions = {
+  pinned?: boolean
+  autoFocusEditor?: boolean
+}
+
+export type TabSliceShape = {
+  openTabIds: string[]
+  activeTabId: string | null
+  previewTabId: string | null
+  editorAutoFocusFileId: string | null
+  openTab: (fileId: string, options?: OpenTabOptions) => void
+  closeTab: (fileId: string) => void
+  activateTab: (fileId: string) => void
+  pinTab: (fileId: string) => void
+  clearEditorAutoFocus: (fileId?: string) => void
+  isPreviewTab: (fileId: string) => boolean
+}
+
+export type OpensObject = Record<string, boolean>
+
+export type PendingCreateNode = {
+  id: string
+  parentId: string | null
+  nodeType: 'file' | 'folder'
+}
+
+export type DragActionType = 'upload' | 'move'
+
+export type DragInsertTarget = {
+  parentId: string | null
+  index: number
+}
+
+export type FileTreeSliceShape = {
+  expandedFolderIds: Set<string>
+  setExpandedFolderIds: (ids: Set<string>) => void
+  toggleFolder: (folderId: string) => void
+  revealFile: (ancestorFolderIds: string[]) => void
+  setExpandedFromOpens: (opens: OpensObject) => void
+  getOpensObject: () => OpensObject
+  selectedTreeNodeId: string | null
+  setSelectedTreeNodeId: (nodeId: string | null) => void
+  selectedNodeIds: Set<string>
+  setSelectedNodeIds: (nodeIds: string[]) => void
+  clearSelection: () => void
+  pendingCreateNode: PendingCreateNode | null
+  startCreateNode: (nodeType: PendingCreateNode['nodeType'], parentId: PendingCreateNode['parentId']) => void
+  clearCreateNode: () => void
+  dragOverFolderId: string | null
+  setDragOverFolderId: (folderId: string | null) => void
+  dragInsertTarget: DragInsertTarget | null
+  setDragInsertTarget: (target: DragInsertTarget | null) => void
+  currentDragType: DragActionType | null
+  setCurrentDragType: (type: DragActionType | null) => void
+  fileTreeSearchTerm: string
+  setFileTreeSearchTerm: (term: string) => void
+}
+
+export type ClipboardOperation = 'cut'
+
+export type ClipboardItem = {
+  operation: ClipboardOperation
+  nodeIds: Set<string>
+}
+
+export type ClipboardSliceShape = {
+  clipboard: ClipboardItem | null
+  cutNodes: (nodeIds: string[]) => void
+  clearClipboard: () => void
+  isCutNode: (nodeId: string) => boolean
+  hasClipboard: () => boolean
+}
+
+export type DirtySliceShape = {
+  dirtyContents: Map<string, string>
+  setDraftContent: (fileId: string, content: string) => void
+  clearDraftContent: (fileId: string) => void
+  isDirty: (fileId: string) => boolean
+  getDraftContent: (fileId: string) => string | undefined
+}
+
+export type MetadataSliceShape = {
+  fileMetadata: Map<string, Record<string, unknown>>
+  dirtyMetadataIds: Set<string>
+  setFileMetadata: (fileId: string, metadata: Record<string, unknown>) => void
+  setDraftMetadata: (fileId: string, metadata: Record<string, unknown>) => void
+  clearDraftMetadata: (fileId: string) => void
+  clearFileMetadata: (fileId: string) => void
+  isMetadataDirty: (fileId: string) => boolean
+  getFileMetadata: (fileId: string) => Record<string, unknown> | undefined
+}
+
+export type UploadStatus = 'idle' | 'uploading' | 'success' | 'partial_error'
+
+export type UploadProgress = {
+  uploaded: number
+  total: number
+  failed: number
+}
+
+export type UploadSliceShape = {
+  uploadStatus: UploadStatus
+  uploadProgress: UploadProgress
+  setUploadStatus: (status: UploadStatus) => void
+  setUploadProgress: (progress: UploadProgress) => void
+  resetUpload: () => void
+}
+
+export type ArtifactSliceShape = {
+  selectedArtifactPath: string | null
+  selectArtifact: (path: string) => void
+  clearArtifactSelection: () => void
+}
+
+export type SkillEditorSliceShape
+  = TabSliceShape
+    & FileTreeSliceShape
+    & ClipboardSliceShape
+    & DirtySliceShape
+    & MetadataSliceShape
+    & UploadSliceShape
+    & ArtifactSliceShape
+    & {
+      resetSkillEditor: () => void
+    }

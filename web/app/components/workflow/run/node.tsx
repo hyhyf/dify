@@ -3,6 +3,7 @@ import type { FC } from 'react'
 import type {
   AgentLogItemWithChildren,
   IterationDurationMap,
+  LLMTraceItem,
   LoopDurationMap,
   LoopVariableMap,
   NodeTracing,
@@ -11,12 +12,13 @@ import {
   RiAlertFill,
   RiArrowRightSLine,
   RiCheckboxCircleFill,
-  RiErrorWarningLine,
+  RiErrorWarningFill,
   RiLoader2Line,
+  RiPauseCircleFill,
 } from '@remixicon/react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Tooltip from '@/app/components/base/tooltip'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/app/components/base/ui/tooltip'
 import CodeEditor from '@/app/components/workflow/nodes/_base/components/editor/code-editor'
 import ErrorHandleTip from '@/app/components/workflow/nodes/_base/components/error-handle/error-handle-tip'
 import { CodeLanguage } from '@/app/components/workflow/nodes/code/types'
@@ -29,6 +31,7 @@ import { BlockEnum } from '../types'
 import LargeDataAlert from '../variable-inspect/large-data-alert'
 import { AgentLogTrigger } from './agent-log'
 import { IterationLogTrigger } from './iteration-log'
+import { LLMLogTrigger } from './llm-log'
 import { LoopLogTrigger } from './loop-log'
 import { RetryLogTrigger } from './retry-log'
 
@@ -43,6 +46,7 @@ type Props = {
   onShowLoopDetail?: (detail: NodeTracing[][], loopDurationMap: LoopDurationMap, loopVariableMap: LoopVariableMap) => void
   onShowRetryDetail?: (detail: NodeTracing[]) => void
   onShowAgentOrToolLog?: (detail?: AgentLogItemWithChildren) => void
+  onShowLLMDetail?: (detail: LLMTraceItem[], nodeId?: string) => void
   notShowIterationNav?: boolean
   notShowLoopNav?: boolean
 }
@@ -58,6 +62,7 @@ const NodePanel: FC<Props> = ({
   onShowLoopDetail,
   onShowRetryDetail,
   onShowAgentOrToolLog,
+  onShowLLMDetail,
   notShowIterationNav,
   notShowLoopNav,
 }) => {
@@ -96,6 +101,7 @@ const NodePanel: FC<Props> = ({
   const isRetryNode = hasRetryNode(nodeInfo.node_type) && !!nodeInfo.retryDetail?.length
   const isAgentNode = nodeInfo.node_type === BlockEnum.Agent && !!nodeInfo.agentLog?.length
   const isToolNode = nodeInfo.node_type === BlockEnum.Tool && !!nodeInfo.agentLog?.length
+  const isLLMNode = nodeInfo.node_type === BlockEnum.LLM && !!nodeInfo.execution_metadata?.llm_trace?.length
 
   const inputsTitle = useMemo(() => {
     let text = t('common.input', { ns: 'workflow' })
@@ -130,22 +136,30 @@ const NodePanel: FC<Props> = ({
               )}
             />
           )}
-          <BlockIcon size={inMessage ? 'xs' : 'sm'} className={cn('mr-2 shrink-0', inMessage && '!mr-1')} type={nodeInfo.node_type} toolIcon={nodeInfo.extras?.icon || nodeInfo.extras} />
-          <Tooltip
-            popupContent={
+          <BlockIcon
+            size={inMessage ? 'xs' : 'sm'}
+            className={cn('mr-2 shrink-0', inMessage && '!mr-1')}
+            type={nodeInfo.node_type}
+            toolIcon={((nodeInfo.extras as { icon?: string } | undefined)?.icon || nodeInfo.extras) as string | { content: string, background: string } | undefined}
+          />
+          <Tooltip>
+            <TooltipTrigger
+              render={(
+                <div className={cn(
+                  'grow truncate text-text-secondary system-xs-semibold-uppercase',
+                  hideInfo && '!text-xs',
+                )}
+                >
+                  {nodeInfo.title}
+                </div>
+              )}
+            />
+            <TooltipContent>
               <div className="max-w-xs">{nodeInfo.title}</div>
-            }
-          >
-            <div className={cn(
-              'system-xs-semibold-uppercase grow truncate text-text-secondary',
-              hideInfo && '!text-xs',
-            )}
-            >
-              {nodeInfo.title}
-            </div>
+            </TooltipContent>
           </Tooltip>
-          {nodeInfo.status !== 'running' && !hideInfo && (
-            <div className="system-xs-regular shrink-0 text-text-tertiary">
+          {!['running', 'paused'].includes(nodeInfo.status) && !hideInfo && (
+            <div className="shrink-0 text-text-tertiary system-xs-regular">
               {nodeInfo.execution_metadata?.total_tokens ? `${getTokenCount(nodeInfo.execution_metadata?.total_tokens || 0)} tokens · ` : ''}
               {`${getTime(nodeInfo.elapsed_time || 0)}`}
             </div>
@@ -154,10 +168,13 @@ const NodePanel: FC<Props> = ({
             <RiCheckboxCircleFill className="ml-2 h-3.5 w-3.5 shrink-0 text-text-success" />
           )}
           {nodeInfo.status === 'failed' && (
-            <RiErrorWarningLine className="ml-2 h-3.5 w-3.5 shrink-0 text-text-warning" />
+            <RiErrorWarningFill className="ml-2 h-3.5 w-3.5 shrink-0 text-text-destructive" />
           )}
           {nodeInfo.status === 'stopped' && (
             <RiAlertFill className={cn('ml-2 h-4 w-4 shrink-0 text-text-warning-secondary', inMessage && 'h-3.5 w-3.5')} />
+          )}
+          {nodeInfo.status === 'paused' && (
+            <RiPauseCircleFill className={cn('ml-2 h-4 w-4 shrink-0 text-text-warning-secondary', inMessage && 'h-3.5 w-3.5')} />
           )}
           {nodeInfo.status === 'exception' && (
             <RiAlertFill className={cn('ml-2 h-4 w-4 shrink-0 text-text-warning-secondary', inMessage && 'h-3.5 w-3.5')} />
@@ -191,6 +208,12 @@ const NodePanel: FC<Props> = ({
               <RetryLogTrigger
                 nodeInfo={nodeInfo}
                 onShowRetryResultList={onShowRetryDetail}
+              />
+            )}
+            {isLLMNode && onShowLLMDetail && (
+              <LLMLogTrigger
+                nodeInfo={nodeInfo}
+                onShowLLMDetail={onShowLLMDetail}
               />
             )}
             {
@@ -229,26 +252,31 @@ const NodePanel: FC<Props> = ({
                   {nodeInfo.error}
                 </StatusContainer>
               )}
+              {(nodeInfo.status === 'paused') && (
+                <StatusContainer status="paused">
+                  <div className="text-text-warning system-xs-regular">{t('nodes.humanInput.log.reasonContent', { ns: 'workflow' })}</div>
+                </StatusContainer>
+              )}
             </div>
-            {nodeInfo.inputs && (
+            {!!nodeInfo.inputs && (
               <div className={cn('mb-1')}>
                 <CodeEditor
                   readOnly
                   title={<div>{inputsTitle}</div>}
                   language={CodeLanguage.json}
-                  value={nodeInfo.inputs}
+                  value={nodeInfo.inputs as string | object}
                   isJSONStringifyBeauty
                   footer={nodeInfo.inputs_truncated && <LargeDataAlert textHasNoExport className="mx-1 mb-1 mt-2 h-7" />}
                 />
               </div>
             )}
-            {nodeInfo.process_data && (
+            {!!nodeInfo.process_data && (
               <div className={cn('mb-1')}>
                 <CodeEditor
                   readOnly
                   title={<div>{processDataTitle}</div>}
                   language={CodeLanguage.json}
-                  value={nodeInfo.process_data}
+                  value={nodeInfo.process_data as string | object}
                   isJSONStringifyBeauty
                 />
               </div>
@@ -259,7 +287,7 @@ const NodePanel: FC<Props> = ({
                   readOnly
                   title={<div>{outputTitle}</div>}
                   language={CodeLanguage.json}
-                  value={nodeInfo.outputs}
+                  value={nodeInfo.outputs as string | object}
                   isJSONStringifyBeauty
                   tip={<ErrorHandleTip type={nodeInfo.execution_metadata?.error_strategy} />}
                   footer={nodeInfo.outputs_truncated && <LargeDataAlert textHasNoExport downloadUrl={nodeInfo.outputs_full_content?.download_url} className="mx-1 mb-1 mt-2 h-7" />}

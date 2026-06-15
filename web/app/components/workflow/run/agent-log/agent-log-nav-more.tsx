@@ -28,7 +28,7 @@ const AgentLogNavMore = ({
       open={open}
       onOpenChange={setOpen}
     >
-      <PortalToFollowElemTrigger>
+      <PortalToFollowElemTrigger onClick={() => setOpen(v => !v)}>
         <Button
           className="h-6 w-6"
           variant="ghost-accent"
@@ -42,7 +42,7 @@ const AgentLogNavMore = ({
             options.map(option => (
               <div
                 key={option.message_id}
-                className="system-md-regular flex h-8 cursor-pointer items-center rounded-lg px-2 text-text-secondary hover:bg-state-base-hover"
+                className="flex h-8 cursor-pointer items-center rounded-lg px-2 text-text-secondary system-md-regular hover:bg-state-base-hover"
                 onClick={() => {
                   onShowAgentOrToolLog(option)
                   setOpen(false)

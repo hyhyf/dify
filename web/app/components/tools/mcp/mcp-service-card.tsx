@@ -1,10 +1,11 @@
 'use client'
 import type { TFunction } from 'i18next'
 import type { FC, ReactNode } from 'react'
+import type { CollaborationUpdate } from '@/app/components/workflow/collaboration/types/collaboration'
 import type { AppDetailResponse } from '@/models/app'
 import type { AppSSO } from '@/types/app'
 import { RiEditLine, RiLoopLeftLine } from '@remixicon/react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
 import Confirm from '@/app/components/base/confirm'
@@ -15,7 +16,10 @@ import Switch from '@/app/components/base/switch'
 import Tooltip from '@/app/components/base/tooltip'
 import Indicator from '@/app/components/header/indicator'
 import MCPServerModal from '@/app/components/tools/mcp/mcp-server-modal'
+import { collaborationManager } from '@/app/components/workflow/collaboration/core/collaboration-manager'
+import { webSocketClient } from '@/app/components/workflow/collaboration/core/websocket-manager'
 import { useDocLink } from '@/context/i18n'
+import { useInvalidateMCPServerDetail } from '@/service/use-tools'
 import { cn } from '@/utils/classnames'
 import { useMCPServiceCardState } from './hooks/use-mcp-service-card'
 
@@ -56,7 +60,7 @@ const ServerURLSection: FC<ServerURLSectionProps> = ({
   const { t } = useTranslation()
   return (
     <div className="flex flex-col items-start justify-center self-stretch">
-      <div className="system-xs-medium pb-1 text-text-tertiary">
+      <div className="pb-1 text-text-tertiary system-xs-medium">
         {t('mcp.server.url', { ns: 'tools' })}
       </div>
       <div className="inline-flex h-9 w-full items-center gap-0.5 rounded-lg bg-components-input-bg-normal p-1 pl-2">
@@ -163,6 +167,7 @@ const MCPServiceCard: FC<IAppCardProps> = ({
   const { t } = useTranslation()
   const docLink = useDocLink()
   const appId = appInfo.id
+  const invalidateMCPServerDetail = useInvalidateMCPServerDetail()
 
   const {
     genLoading,
@@ -191,13 +196,33 @@ const MCPServiceCard: FC<IAppCardProps> = ({
   const [pendingStatus, setPendingStatus] = useState<boolean | null>(null)
   const activated = pendingStatus ?? serverActivated
 
+  const emitMcpServerUpdate = (payload: { action: string, status?: string }) => {
+    const socket = webSocketClient.getSocket(appId)
+    if (!socket)
+      return
+
+    const timestamp = Date.now()
+    socket.emit('collaboration_event', {
+      type: 'mcp_server_update',
+      data: {
+        ...payload,
+        timestamp,
+      },
+      timestamp,
+    })
+  }
+
   const onChangeStatus = async (state: boolean) => {
     setPendingStatus(state)
     const result = await handleStatusChange(state)
     if (!result.activated && state) {
       // Server modal was opened instead, clear pending status
       setPendingStatus(null)
+      return
     }
+
+    // Emit collaboration event to notify other clients of MCP server status change
+    emitMcpServerUpdate({ action: 'statusChanged', status: state ? 'active' : 'inactive' })
   }
 
   const onServerModalHide = () => {
@@ -206,10 +231,28 @@ const MCPServiceCard: FC<IAppCardProps> = ({
     setPendingStatus(null)
   }
 
-  const onConfirmRegenerate = () => {
-    handleGenCode()
+  const onConfirmRegenerate = async () => {
+    await handleGenCode()
+    emitMcpServerUpdate({ action: 'codeRegenerated' })
     closeConfirmDelete()
   }
+
+  // Listen for collaborative MCP server updates from other clients
+  useEffect(() => {
+    if (!appId)
+      return
+
+    const unsubscribe = collaborationManager.onMcpServerUpdate((_update: CollaborationUpdate) => {
+      try {
+        invalidateMCPServerDetail(appId)
+      }
+      catch (error) {
+        console.error('MCP server update failed:', error)
+      }
+    })
+
+    return unsubscribe
+  }, [appId, invalidateMCPServerDetail])
 
   if (isLoading)
     return null
@@ -237,7 +280,7 @@ const MCPServiceCard: FC<IAppCardProps> = ({
                   <Mcp className="h-4 w-4 text-text-primary-on-surface" />
                 </div>
                 <div className="group w-full">
-                  <div className="system-md-semibold min-w-0 overflow-hidden text-ellipsis break-normal text-text-secondary group-hover:text-text-primary">
+                  <div className="min-w-0 overflow-hidden text-ellipsis break-normal text-text-secondary system-md-semibold group-hover:text-text-primary">
                     {t('mcp.server.title', { ns: 'tools' })}
                   </div>
                 </div>
@@ -250,7 +293,7 @@ const MCPServiceCard: FC<IAppCardProps> = ({
                 offset={24}
               >
                 <div>
-                  <Switch defaultValue={activated} onChange={onChangeStatus} disabled={toggleDisabled} />
+                  <Switch value={activated} onChange={onChangeStatus} disabled={toggleDisabled} />
                 </div>
               </Tooltip>
             </div>
@@ -274,7 +317,7 @@ const MCPServiceCard: FC<IAppCardProps> = ({
               >
                 <div className="flex items-center justify-center gap-[1px]">
                   <RiEditLine className="h-3.5 w-3.5" />
-                  <div className="system-xs-medium px-[3px] text-text-tertiary">
+                  <div className="px-[3px] text-text-tertiary system-xs-medium">
                     {serverPublished ? t('mcp.server.edit', { ns: 'tools' }) : t('mcp.server.addDescription', { ns: 'tools' })}
                   </div>
                 </div>

@@ -1,5 +1,6 @@
+import type { UpdateWorkflowNodesMapPayload } from './index'
 import type { WorkflowNodesMap } from './node'
-import type { ValueSelector, Var } from '@/app/components/workflow/types'
+import type { NodeOutPutVar, ValueSelector, Var } from '@/app/components/workflow/types'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { mergeRegister } from '@lexical/utils'
 import {
@@ -14,13 +15,14 @@ import {
 } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useReactFlow, useStoreApi } from 'reactflow'
-import Tooltip from '@/app/components/base/tooltip'
-import { isConversationVar, isENV, isGlobalVar, isRagVariableVar, isSystemVar } from '@/app/components/workflow/nodes/_base/components/variable/utils'
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/app/components/base/ui/tooltip'
+import { isConversationVar, isENV, isGlobalVar, isRagVariableVar, isSystemVar, isValueSelectorInNodeOutputVars } from '@/app/components/workflow/nodes/_base/components/variable/utils'
 import VarFullPathPanel from '@/app/components/workflow/nodes/_base/components/variable/var-full-path-panel'
 import {
   VariableLabelInEditor,
 } from '@/app/components/workflow/nodes/_base/components/variable/variable-label'
 import { Type } from '@/app/components/workflow/nodes/llm/types'
+import { BlockEnum } from '@/app/components/workflow/types'
 import { isExceptionVariable } from '@/app/components/workflow/utils'
 import { useSelectOrDelete } from '../../hooks'
 import {
@@ -28,11 +30,13 @@ import {
   UPDATE_WORKFLOW_NODES_MAP,
 } from './index'
 import { WorkflowVariableBlockNode } from './node'
+import { useLlmModelPluginInstalled } from './use-llm-model-plugin-installed'
 
 type WorkflowVariableBlockComponentProps = {
   nodeKey: string
   variables: string[]
   workflowNodesMap: WorkflowNodesMap
+  nodeOutputVars?: NodeOutPutVar[]
   environmentVariables?: Var[]
   conversationVariables?: Var[]
   ragVariables?: Var[]
@@ -46,6 +50,7 @@ const WorkflowVariableBlockComponent = ({
   nodeKey,
   variables,
   workflowNodesMap = {},
+  nodeOutputVars,
   getVarType,
   environmentVariables,
   conversationVariables,
@@ -65,10 +70,18 @@ const WorkflowVariableBlockComponent = ({
     }
   )()
   const [localWorkflowNodesMap, setLocalWorkflowNodesMap] = useState<WorkflowNodesMap>(workflowNodesMap)
+  const [localNodeOutputVars, setLocalNodeOutputVars] = useState<NodeOutPutVar[]>(nodeOutputVars || [])
   const node = localWorkflowNodesMap![variables[isRagVar ? 1 : 0]]
+  const isContextVariable = (node?.type === BlockEnum.Agent || node?.type === BlockEnum.LLM)
+    && variables[variablesLength - 1] === 'context'
 
   const isException = isExceptionVariable(varName, node?.type)
+  const sourceNodeId = variables[isRagVar ? 1 : 0]
+  const isLlmModelInstalled = useLlmModelPluginInstalled(sourceNodeId, localWorkflowNodesMap)
   const variableValid = useMemo(() => {
+    if (localNodeOutputVars.length)
+      return isValueSelectorInNodeOutputVars(variables, localNodeOutputVars)
+
     let variableValid = true
     const isEnv = isENV(variables)
     const isChatVar = isConversationVar(variables)
@@ -92,7 +105,7 @@ const WorkflowVariableBlockComponent = ({
       variableValid = !!node
     }
     return variableValid
-  }, [variables, node, environmentVariables, conversationVariables, isRagVar, ragVariables])
+  }, [variables, node, environmentVariables, conversationVariables, isRagVar, ragVariables, localNodeOutputVars])
 
   const reactflow = useReactFlow()
   const store = useStoreApi()
@@ -104,8 +117,9 @@ const WorkflowVariableBlockComponent = ({
     return mergeRegister(
       editor.registerCommand(
         UPDATE_WORKFLOW_NODES_MAP,
-        (workflowNodesMap: WorkflowNodesMap) => {
-          setLocalWorkflowNodesMap(workflowNodesMap)
+        (payload: UpdateWorkflowNodesMapPayload) => {
+          setLocalWorkflowNodesMap(payload.workflowNodesMap)
+          setLocalNodeOutputVars(payload.nodeOutputVars)
 
           return true
         },
@@ -134,6 +148,9 @@ const WorkflowVariableBlockComponent = ({
     })
   }, [node, reactflow, store])
 
+  if (isContextVariable)
+    return <span className="hidden" ref={ref} />
+
   const Item = (
     <VariableLabelInEditor
       nodeType={node?.type}
@@ -144,7 +161,13 @@ const WorkflowVariableBlockComponent = ({
         handleVariableJump()
       }}
       isExceptionVariable={isException}
-      errorMsg={!variableValid ? t('errorMsg.invalidVariable', { ns: 'workflow' }) : undefined}
+      errorMsg={
+        !variableValid
+          ? t('errorMsg.invalidVariable', { ns: 'workflow' })
+          : !isLlmModelInstalled
+              ? t('errorMsg.modelPluginNotInstalled', { ns: 'workflow' })
+              : undefined
+      }
       isSelected={isSelected}
       ref={ref}
       notShowFullPath={isShowAPart}
@@ -155,9 +178,9 @@ const WorkflowVariableBlockComponent = ({
     return Item
 
   return (
-    <Tooltip
-      noDecoration
-      popupContent={(
+    <Tooltip>
+      <TooltipTrigger disabled={!isShowAPart} render={<div>{Item}</div>} />
+      <TooltipContent variant="plain">
         <VarFullPathPanel
           nodeName={node.title}
           path={variables.slice(1)}
@@ -169,10 +192,7 @@ const WorkflowVariableBlockComponent = ({
             : Type.string}
           nodeType={node?.type}
         />
-      )}
-      disabled={!isShowAPart}
-    >
-      <div>{Item}</div>
+      </TooltipContent>
     </Tooltip>
   )
 }

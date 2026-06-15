@@ -1,0 +1,174 @@
+'use client'
+
+import type { Tool } from '@/app/components/tools/types'
+import type { ToolValue } from '@/app/components/workflow/block-selector/types'
+import type { Node, NodeOutPutVar, ToolWithProvider } from '@/app/components/workflow/types'
+import * as React from 'react'
+import { useMemo } from 'react'
+import { useTranslation } from 'react-i18next'
+import Divider from '@/app/components/base/divider'
+import { FormTypeEnum } from '@/app/components/header/account-setting/model-provider-page/declarations'
+import ReasoningConfigForm from '@/app/components/plugins/plugin-detail-panel/tool-selector/reasoning-config-form'
+import { toolParametersToFormSchemas } from '@/app/components/tools/utils/to-form-schema'
+import { VarKindType } from '@/app/components/workflow/nodes/_base/types'
+
+type ToolFormSchema = {
+  variable: string
+  type: string
+  default?: unknown
+  [key: string]: unknown
+}
+
+type ToolConfigValueItem = {
+  auto?: 0 | 1
+  value?: {
+    type: VarKindType
+    value?: unknown
+  }
+}
+
+type ToolConfigValueMap = Record<string, ToolConfigValueItem>
+
+type ToolSettingsSectionProps = {
+  currentProvider?: ToolWithProvider
+  currentTool?: Tool
+  value?: ToolValue
+  nodeId?: string
+  nodesOutputVars?: NodeOutPutVar[]
+  availableNodes?: Node[]
+  enableVariableReference?: boolean
+  onChange?: (value: ToolValue) => void
+}
+
+const ToolSettingsSection = ({
+  currentProvider,
+  currentTool,
+  value,
+  nodeId,
+  nodesOutputVars,
+  availableNodes,
+  enableVariableReference = false,
+  onChange,
+}: ToolSettingsSectionProps) => {
+  const { t } = useTranslation()
+  const resolvedNodeId = enableVariableReference ? (nodeId || 'workflow') : undefined
+
+  const currentToolSettings = useMemo(() => {
+    if (!currentTool)
+      return []
+    return currentTool.parameters?.filter(param => param.form !== 'llm') || []
+  }, [currentTool])
+  const currentToolParams = useMemo(() => {
+    if (!currentTool)
+      return []
+    return currentTool.parameters?.filter(param => param.form === 'llm') || []
+  }, [currentTool])
+
+  const settingsFormSchemas = useMemo(
+    () => toolParametersToFormSchemas(currentToolSettings) as ToolFormSchema[],
+    [currentToolSettings],
+  )
+  const paramsFormSchemas = useMemo(
+    () => toolParametersToFormSchemas(currentToolParams) as ToolFormSchema[],
+    [currentToolParams],
+  )
+
+  const handleSettingsFormChange = (v: ToolConfigValueMap) => {
+    if (!value || !onChange)
+      return
+    onChange({
+      ...value,
+      settings: v,
+    })
+  }
+
+  const handleParamsFormChange = (v: ToolConfigValueMap) => {
+    if (!value || !onChange)
+      return
+    onChange({
+      ...value,
+      parameters: v,
+    })
+  }
+
+  if (!currentProvider?.is_team_authorization)
+    return null
+
+  if (!currentToolSettings.length && !currentToolParams.length)
+    return null
+
+  const showSettingsSection = currentToolSettings.length > 0
+  const showParamsSection = currentToolParams.length > 0
+  const canUseAutoByType = (type: string) =>
+    ![FormTypeEnum.modelSelector, FormTypeEnum.appSelector].includes(type as FormTypeEnum)
+  const getVarKindType = (type: FormTypeEnum | string) => {
+    if (type === FormTypeEnum.file || type === FormTypeEnum.files)
+      return VarKindType.variable
+    if (type === FormTypeEnum.select || type === FormTypeEnum.checkbox || type === FormTypeEnum.textNumber || type === FormTypeEnum.array || type === FormTypeEnum.object)
+      return VarKindType.constant
+    if (type === FormTypeEnum.textInput || type === FormTypeEnum.secretInput)
+      return VarKindType.mixed
+    return VarKindType.constant
+  }
+  const getSafeConfigValue = (rawValue: ToolConfigValueMap | undefined, schemas: ToolFormSchema[]) => {
+    const nextValue: ToolConfigValueMap = { ...(rawValue || {}) }
+    schemas.forEach((schema) => {
+      const currentValue = nextValue[schema.variable]
+      if (!currentValue) {
+        const canUseAuto = canUseAutoByType(schema.type)
+        nextValue[schema.variable] = {
+          auto: canUseAuto ? 1 : 0,
+          value: {
+            type: getVarKindType(schema.type),
+            value: schema.default ?? null,
+          },
+        }
+        return
+      }
+      if (currentValue.auto === undefined)
+        currentValue.auto = canUseAutoByType(schema.type) ? 1 : 0
+      if (currentValue.value === undefined) {
+        currentValue.value = {
+          type: getVarKindType(schema.type),
+          value: schema.default ?? null,
+        }
+      }
+    })
+    return nextValue
+  }
+
+  return (
+    <>
+      <Divider className="my-1 w-full" />
+      <div className="px-4 pb-1 pt-3">
+        <div className="mb-1 text-text-primary system-sm-semibold-uppercase">{t('detailPanel.toolSelector.reasoningConfig', { ns: 'plugin' })}</div>
+        <div className="text-text-tertiary system-xs-regular">{t('detailPanel.toolSelector.paramsTip1', { ns: 'plugin' })}</div>
+        <div className="text-text-tertiary system-xs-regular">{t('detailPanel.toolSelector.paramsTip2', { ns: 'plugin' })}</div>
+      </div>
+      {showSettingsSection && (
+        <ReasoningConfigForm
+          value={getSafeConfigValue(value?.settings as ToolConfigValueMap, settingsFormSchemas)}
+          onChange={handleSettingsFormChange}
+          schemas={settingsFormSchemas}
+          nodeId={resolvedNodeId}
+          nodeOutputVars={nodesOutputVars}
+          availableNodes={availableNodes}
+          disableVariableReference={!enableVariableReference}
+        />
+      )}
+      {showParamsSection && (
+        <ReasoningConfigForm
+          value={getSafeConfigValue(value?.parameters as ToolConfigValueMap, paramsFormSchemas)}
+          onChange={handleParamsFormChange}
+          schemas={paramsFormSchemas}
+          nodeId={resolvedNodeId}
+          nodeOutputVars={nodesOutputVars}
+          availableNodes={availableNodes}
+          disableVariableReference={!enableVariableReference}
+        />
+      )}
+    </>
+  )
+}
+
+export default React.memo(ToolSettingsSection)

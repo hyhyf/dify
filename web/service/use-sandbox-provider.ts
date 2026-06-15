@@ -1,0 +1,52 @@
+import {
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { consoleClient, consoleQuery } from '@/service/client'
+
+export const useSaveSandboxProviderConfig = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.sandboxProvider.saveSandboxProviderConfig.mutationKey(),
+    mutationFn: ({ providerType, config, activate }: { providerType: string, config: Record<string, string>, activate?: boolean }) => {
+      return consoleClient.sandboxProvider.saveSandboxProviderConfig({
+        params: { providerType },
+        body: { config, activate },
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: consoleQuery.sandboxProvider.getSandboxProviderList.key({ type: 'query' }) })
+    },
+  })
+}
+
+export const useDeleteSandboxProviderConfig = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.sandboxProvider.deleteSandboxProviderConfig.mutationKey(),
+    mutationFn: (providerType: string) => {
+      return consoleClient.sandboxProvider.deleteSandboxProviderConfig({
+        params: { providerType },
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: consoleQuery.sandboxProvider.getSandboxProviderList.key({ type: 'query' }) })
+    },
+  })
+}
+
+export const useActivateSandboxProvider = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.sandboxProvider.activateSandboxProvider.mutationKey(),
+    mutationFn: ({ providerType, type }: { providerType: string, type: 'system' | 'user' }) => {
+      return consoleClient.sandboxProvider.activateSandboxProvider({
+        params: { providerType },
+        body: { type },
+      })
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: consoleQuery.sandboxProvider.getSandboxProviderList.key({ type: 'query' }) })
+    },
+  })
+}

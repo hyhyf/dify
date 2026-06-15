@@ -1,19 +1,27 @@
 # base image
-FROM node:24-alpine AS base
+FROM node:22-alpine AS base
 LABEL maintainer="takatost@gmail.com"
 
-# if you located in China, you can use aliyun mirror to speed up
+# China network: use aliyun mirror for Alpine packages (disabled due to proxy routing issues)
 # RUN sed -i 's/dl-cdn.alpinelinux.org/mirrors.aliyun.com/g' /etc/apk/repositories
 
-# if you located in China, you can use taobao registry to speed up
-# RUN npm config set registry https://registry.npmmirror.com
+# China network: use npmmirror for npm
+RUN npm config set registry https://registry.npmmirror.com
 
 RUN apk add --no-cache tzdata
-RUN corepack enable
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
+
+# China network: set corepack registry to npmmirror
+ENV COREPACK_NPM_REGISTRY=https://registry.npmmirror.com
+
+RUN corepack enable
 ARG NEXT_PUBLIC_BASE_PATH=""
 ENV NEXT_PUBLIC_BASE_PATH="$NEXT_PUBLIC_BASE_PATH"
+ARG ENABLE_SOURCE_MAP=""
+ENV ENABLE_SOURCE_MAP="$ENABLE_SOURCE_MAP"
+ARG ENABLE_PROD_SOURCEMAP="false"
+ENV ENABLE_PROD_SOURCEMAP="$ENABLE_PROD_SOURCEMAP"
 
 
 # install packages
@@ -26,6 +34,9 @@ COPY package.json pnpm-lock.yaml /app/web/
 # Use packageManager from package.json
 RUN corepack install
 
+# China network: use npmmirror for pnpm
+RUN pnpm config set registry https://registry.npmmirror.com
+
 RUN pnpm install --frozen-lockfile
 
 # build resources
@@ -34,8 +45,12 @@ WORKDIR /app/web
 COPY --from=packages /app/web/ .
 COPY . .
 
-ENV NODE_OPTIONS="--max-old-space-size=4096"
-RUN pnpm build:docker
+ENV NODE_OPTIONS="--max-old-space-size=6144"
+ENV NEXT_TELEMETRY_DISABLED=1
+ENV TURBOPACK=0
+ENV UV_THREADPOOL_SIZE=8
+ENV CI=true
+RUN pnpm build
 
 
 # production stage
@@ -50,24 +65,18 @@ ENV MARKETPLACE_API_URL=https://marketplace.dify.ai
 ENV MARKETPLACE_URL=https://marketplace.dify.ai
 ENV PORT=3000
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV PM2_INSTANCES=2
 
 # set timezone
 ENV TZ=UTC
 RUN ln -s /usr/share/zoneinfo/${TZ} /etc/localtime \
     && echo ${TZ} > /etc/timezone
 
-# global runtime packages
-RUN pnpm add -g pm2
-
-
 # Create non-root user
 ARG dify_uid=1001
 RUN addgroup -S -g ${dify_uid} dify && \
     adduser -S -u ${dify_uid} -G dify -s /bin/ash -h /home/dify dify && \
     mkdir /app && \
-    mkdir /.pm2 && \
-    chown -R dify:dify /app /.pm2
+    chown -R dify:dify /app
 
 
 WORKDIR /app/web

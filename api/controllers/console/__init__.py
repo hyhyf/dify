@@ -32,13 +32,17 @@ for module_name in RESOURCE_MODULES:
 
 # Ensure resource modules are imported so route decorators are evaluated.
 # Import other controllers
+# Sandbox file browser
 from . import (
     admin,
     apikey,
     extension,
     feature,
+    human_input_form,
     init_validate,
+    notification,
     ping,
+    sandbox_files,
     setup,
     spec,
     version,
@@ -50,6 +54,7 @@ from .app import (
     agent,
     annotation,
     app,
+    app_asset,
     audio,
     completion,
     conversation,
@@ -60,9 +65,11 @@ from .app import (
     model_config,
     ops_trace,
     site,
+    skills,
     statistic,
     workflow,
     workflow_app_log,
+    workflow_comment,
     workflow_draft_variable,
     workflow_run,
     workflow_statistic,
@@ -114,6 +121,7 @@ from .explore import (
     saved_message,
     trial,
 )
+from .socketio import workflow as socketio_workflow  # pyright: ignore[reportUnusedImport]
 
 # Import tag controllers
 from .tag import tags
@@ -128,6 +136,7 @@ from .workspace import (
     model_providers,
     models,
     plugin,
+    sandbox_providers,
     tool_providers,
     trigger_providers,
     workspace,
@@ -146,6 +155,7 @@ __all__ = [
     "api",
     "apikey",
     "app",
+    "app_asset",
     "audio",
     "banner",
     "billing",
@@ -171,6 +181,7 @@ __all__ = [
     "forgot_password",
     "generator",
     "hit_testing",
+    "human_input_form",
     "init_validate",
     "installed_app",
     "load_balancing_config",
@@ -182,6 +193,7 @@ __all__ = [
     "model_config",
     "model_providers",
     "models",
+    "notification",
     "oauth",
     "oauth_server",
     "ops_trace",
@@ -194,9 +206,12 @@ __all__ = [
     "rag_pipeline_import",
     "rag_pipeline_workflow",
     "recommended_app",
+    "sandbox_files",
+    "sandbox_providers",
     "saved_message",
     "setup",
     "site",
+    "skills",
     "spec",
     "statistic",
     "tags",
@@ -207,6 +222,7 @@ __all__ = [
     "website",
     "workflow",
     "workflow_app_log",
+    "workflow_comment",
     "workflow_draft_variable",
     "workflow_run",
     "workflow_statistic",

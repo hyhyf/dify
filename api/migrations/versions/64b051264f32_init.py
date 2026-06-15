@@ -1102,7 +1102,7 @@ def upgrade():
         sa.Column('id', models.types.StringUUID(), nullable=False),
         sa.Column('name', sa.String(length=255), nullable=False),
         sa.Column('encrypt_public_key', models.types.LongText(), nullable=True),
-        sa.Column('plan', sa.String(length=255), server_default=sa.text("'basic'"), nullable=False),
+        sa.Column('plan', sa.String(length=255), server_default=sa.text("'basic'"), nullable=False, quote=True),
         sa.Column('status', sa.String(length=255), server_default=sa.text("'normal'"), nullable=False),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.current_timestamp(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.current_timestamp(), nullable=False),

@@ -4,6 +4,7 @@ import re
 import time
 from collections.abc import Callable, Generator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from threading import Thread
 from typing import Any, Union
 
@@ -19,11 +20,14 @@ from core.app.entities.app_invoke_entities import (
     InvokeFrom,
 )
 from core.app.entities.queue_entities import (
+    ChunkType,
     MessageQueueMessage,
     QueueAdvancedChatMessageEndEvent,
     QueueAgentLogEvent,
     QueueAnnotationReplyEvent,
     QueueErrorEvent,
+    QueueHumanInputFormFilledEvent,
+    QueueHumanInputFormTimeoutEvent,
     QueueIterationCompletedEvent,
     QueueIterationNextEvent,
     QueueIterationStartEvent,
@@ -42,6 +46,7 @@ from core.app.entities.queue_entities import (
     QueueTextChunkEvent,
     QueueWorkflowFailedEvent,
     QueueWorkflowPartialSuccessEvent,
+    QueueWorkflowPausedEvent,
     QueueWorkflowStartedEvent,
     QueueWorkflowSucceededEvent,
     WorkflowQueueMessage,
@@ -60,21 +65,145 @@ from core.app.entities.task_entities import (
 from core.app.task_pipeline.based_generate_task_pipeline import BasedGenerateTaskPipeline
 from core.app.task_pipeline.message_cycle_manager import MessageCycleManager
 from core.base.tts import AppGeneratorTTSPublisher, AudioTrunk
-from core.model_runtime.entities.llm_entities import LLMUsage
-from core.model_runtime.utils.encoders import jsonable_encoder
 from core.ops.ops_trace_manager import TraceQueueManager
-from core.workflow.enums import WorkflowExecutionStatus
-from core.workflow.nodes import NodeType
-from core.workflow.repositories.draft_variable_repository import DraftVariableSaverFactory
-from core.workflow.runtime import GraphRuntimeState
-from core.workflow.system_variable import SystemVariable
+from core.repositories.human_input_repository import HumanInputFormRepositoryImpl
+from dify_graph.entities.pause_reason import HumanInputRequired
+from dify_graph.enums import WorkflowExecutionStatus
+from dify_graph.model_runtime.entities.llm_entities import LLMUsage
+from dify_graph.model_runtime.utils.encoders import jsonable_encoder
+from dify_graph.nodes import BuiltinNodeTypes
+from dify_graph.repositories.draft_variable_repository import DraftVariableSaverFactory
+from dify_graph.runtime import GraphRuntimeState
+from dify_graph.system_variable import SystemVariable
 from extensions.ext_database import db
 from libs.datetime_utils import naive_utc_now
-from models import Account, Conversation, EndUser, Message, MessageFile
-from models.enums import CreatorUserRole
+from models import Account, Conversation, EndUser, LLMGenerationDetail, Message, MessageFile
+from models.enums import CreatorUserRole, MessageFileBelongsTo, MessageStatus
+from models.execution_extra_content import HumanInputContent
 from models.workflow import Workflow
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class StreamEventBuffer:
+    """
+    Buffer for recording stream events in order to reconstruct the generation sequence.
+    Records the exact order of text chunks, thoughts, and tool calls as they stream.
+    """
+
+    # Accumulated reasoning content (each thought block is a separate element)
+    reasoning_content: list[str] = field(default_factory=list)
+    # Current reasoning buffer (accumulates until we see a different event type)
+    _current_reasoning: str = ""
+    # Tool calls with their details
+    tool_calls: list[dict] = field(default_factory=list)
+    # Tool call ID to index mapping for updating results
+    _tool_call_id_map: dict[str, int] = field(default_factory=dict)
+    # Sequence of events in stream order
+    sequence: list[dict] = field(default_factory=list)
+    # Current position in answer text
+    _content_position: int = 0
+    # Track last event type to detect transitions
+    _last_event_type: str | None = None
+
+    def _flush_current_reasoning(self) -> None:
+        """Flush accumulated reasoning to the list and add to sequence."""
+        if self._current_reasoning.strip():
+            self.reasoning_content.append(self._current_reasoning.strip())
+            self.sequence.append({"type": "reasoning", "index": len(self.reasoning_content) - 1})
+            self._current_reasoning = ""
+
+    def record_text_chunk(self, text: str) -> None:
+        """Record a text chunk event."""
+        if not text:
+            return
+
+        # Flush any pending reasoning first
+        if self._last_event_type == "thought":
+            self._flush_current_reasoning()
+
+        text_len = len(text)
+        start_pos = self._content_position
+
+        # If last event was also content, extend it; otherwise create new
+        if self.sequence and self.sequence[-1].get("type") == "content":
+            self.sequence[-1]["end"] = start_pos + text_len
+        else:
+            self.sequence.append({"type": "content", "start": start_pos, "end": start_pos + text_len})
+
+        self._content_position += text_len
+        self._last_event_type = "content"
+
+    def record_thought_chunk(self, text: str) -> None:
+        """Record a thought/reasoning chunk event."""
+        if not text:
+            return
+
+        # Accumulate thought content
+        self._current_reasoning += text
+        self._last_event_type = "thought"
+
+    def record_tool_call(
+        self,
+        tool_call_id: str,
+        tool_name: str,
+        tool_arguments: str,
+        tool_icon: str | dict | None = None,
+        tool_icon_dark: str | dict | None = None,
+    ) -> None:
+        """Record a tool call event."""
+        if not tool_call_id:
+            return
+
+        # Flush any pending reasoning first
+        if self._last_event_type == "thought":
+            self._flush_current_reasoning()
+
+        # Check if this tool call already exists (we might get multiple chunks)
+        if tool_call_id in self._tool_call_id_map:
+            idx = self._tool_call_id_map[tool_call_id]
+            # Update arguments if provided
+            if tool_arguments:
+                self.tool_calls[idx]["arguments"] = tool_arguments
+        else:
+            # New tool call
+            tool_call = {
+                "id": tool_call_id or "",
+                "name": tool_name or "",
+                "arguments": tool_arguments or "",
+                "result": "",
+                "elapsed_time": None,
+                "icon": tool_icon,
+                "icon_dark": tool_icon_dark,
+            }
+            self.tool_calls.append(tool_call)
+            idx = len(self.tool_calls) - 1
+            self._tool_call_id_map[tool_call_id] = idx
+            self.sequence.append({"type": "tool_call", "index": idx})
+
+        self._last_event_type = "tool_call"
+
+    def record_tool_result(self, tool_call_id: str, result: str, tool_elapsed_time: float | None = None) -> None:
+        """Record a tool result event (update existing tool call)."""
+        if not tool_call_id:
+            return
+        if tool_call_id in self._tool_call_id_map:
+            idx = self._tool_call_id_map[tool_call_id]
+            self.tool_calls[idx]["result"] = result
+            self.tool_calls[idx]["elapsed_time"] = tool_elapsed_time
+            # Remove from map after result is recorded, so that subsequent calls
+            # with the same tool_call_id are treated as new tool calls
+            del self._tool_call_id_map[tool_call_id]
+
+    def finalize(self) -> None:
+        """Finalize the buffer, flushing any pending data."""
+        if self._last_event_type == "thought":
+            self._flush_current_reasoning()
+
+    def has_data(self) -> bool:
+        """Check if there's any meaningful data recorded."""
+        return bool(self.reasoning_content or self.tool_calls or self.sequence)
 
 
 class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
@@ -128,6 +257,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         )
 
         self._task_state = WorkflowTaskState()
+        self._seed_task_state_from_message(message)
         self._message_cycle_manager = MessageCycleManager(
             application_generate_entity=application_generate_entity, task_state=self._task_state
         )
@@ -135,6 +265,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         self._application_generate_entity = application_generate_entity
         self._workflow_id = workflow.id
         self._workflow_features_dict = workflow.features_dict
+        self._workflow_tenant_id = workflow.tenant_id
         self._conversation_id = conversation.id
         self._conversation_mode = conversation.mode
         self._message_id = message.id
@@ -144,7 +275,14 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         self._workflow_run_id: str = ""
         self._draft_var_saver_factory = draft_var_saver_factory
         self._graph_runtime_state: GraphRuntimeState | None = None
+        # Stream event buffer for recording generation sequence
+        self._stream_buffer = StreamEventBuffer()
+        self._message_saved_on_pause = False
         self._seed_graph_runtime_state_from_queue_manager()
+
+    def _seed_task_state_from_message(self, message: Message) -> None:
+        if message.status == MessageStatus.PAUSED and message.answer:
+            self._task_state.answer = message.answer
 
     def process(self) -> Union[ChatbotAppBlockingResponse, Generator[ChatbotAppStreamResponse, None, None]]:
         """
@@ -308,6 +446,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             task_id=self._application_generate_entity.task_id,
             workflow_run_id=run_id,
             workflow_id=self._workflow_id,
+            reason=event.reason,
         )
 
         yield workflow_start_resp
@@ -343,7 +482,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
     ) -> Generator[StreamResponse, None, None]:
         """Handle node succeeded events."""
         # Record files if it's an answer node or end node
-        if event.node_type in [NodeType.ANSWER, NodeType.END, NodeType.LLM]:
+        if event.node_type in [BuiltinNodeTypes.ANSWER, BuiltinNodeTypes.END, BuiltinNodeTypes.LLM]:
             self._recorded_files.extend(
                 self._workflow_response_converter.fetch_files_from_node_outputs(event.outputs or {})
             )
@@ -383,7 +522,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         queue_message: Union[WorkflowQueueMessage, MessageQueueMessage] | None = None,
         **kwargs,
     ) -> Generator[StreamResponse, None, None]:
-        """Handle text chunk events."""
+        """Handle text chunk events and record to stream buffer for sequence reconstruction."""
         delta_text = event.text
         if delta_text is None:
             return
@@ -405,9 +544,60 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         if tts_publisher and queue_message:
             tts_publisher.publish(queue_message)
 
-        self._task_state.answer += delta_text
+        tool_call = event.tool_call
+        tool_result = event.tool_result
+        tool_payload = tool_call or tool_result
+        tool_call_id = tool_payload.id if tool_payload and tool_payload.id else ""
+        tool_name = tool_payload.name if tool_payload and tool_payload.name else ""
+        tool_arguments = tool_call.arguments if tool_call and tool_call.arguments else ""
+        tool_files = tool_result.files if tool_result else []
+        tool_elapsed_time = tool_result.elapsed_time if tool_result else None
+        tool_icon = tool_payload.icon if tool_payload else None
+        tool_icon_dark = tool_payload.icon_dark if tool_payload else None
+        # Record stream event based on chunk type
+        chunk_type = event.chunk_type or ChunkType.TEXT
+        match chunk_type:
+            case ChunkType.TEXT:
+                self._stream_buffer.record_text_chunk(delta_text)
+                self._task_state.answer += delta_text
+            case ChunkType.THOUGHT:
+                # Reasoning should not be part of final answer text
+                self._stream_buffer.record_thought_chunk(delta_text)
+            case ChunkType.TOOL_CALL:
+                self._stream_buffer.record_tool_call(
+                    tool_call_id=tool_call_id,
+                    tool_name=tool_name,
+                    tool_arguments=tool_arguments,
+                    tool_icon=tool_icon,
+                    tool_icon_dark=tool_icon_dark,
+                )
+            case ChunkType.TOOL_RESULT:
+                self._stream_buffer.record_tool_result(
+                    tool_call_id=tool_call_id,
+                    result=delta_text,
+                    tool_elapsed_time=tool_elapsed_time,
+                )
+            case _:
+                pass
         yield self._message_cycle_manager.message_to_stream_response(
-            answer=delta_text, message_id=self._message_id, from_variable_selector=event.from_variable_selector
+            answer=delta_text,
+            message_id=self._message_id,
+            from_variable_selector=event.from_variable_selector,
+            chunk_type=event.chunk_type.value if event.chunk_type else None,
+            tool_call_id=tool_call_id or None,
+            tool_name=tool_name or None,
+            tool_arguments=tool_arguments or None,
+            tool_files=tool_files,
+            tool_elapsed_time=tool_elapsed_time,
+            tool_icon=tool_icon,
+            tool_icon_dark=tool_icon_dark,
+            node_id=event.node_id,
+            model_provider=event.model_provider,
+            model_name=event.model_name,
+            model_icon=event.model_icon,
+            model_icon_dark=event.model_icon_dark,
+            model_usage=event.model_usage,
+            model_duration=event.model_duration,
         )
 
     def _handle_iteration_start_event(
@@ -502,8 +692,10 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             graph_runtime_state=validated_state,
         )
 
+        yield from self._handle_advanced_chat_message_end_event(
+            QueueAdvancedChatMessageEndEvent(), graph_runtime_state=validated_state
+        )
         yield workflow_finish_resp
-        self._base_task_pipeline.queue_manager.publish(QueueAdvancedChatMessageEndEvent(), PublishFrom.TASK_PIPELINE)
 
     def _handle_workflow_partial_success_event(
         self,
@@ -524,7 +716,39 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             exceptions_count=event.exceptions_count,
         )
 
+        yield from self._handle_advanced_chat_message_end_event(
+            QueueAdvancedChatMessageEndEvent(), graph_runtime_state=validated_state
+        )
         yield workflow_finish_resp
+
+    def _handle_workflow_paused_event(
+        self,
+        event: QueueWorkflowPausedEvent,
+        **kwargs,
+    ) -> Generator[StreamResponse, None, None]:
+        """Handle workflow paused events."""
+        validated_state = self._ensure_graph_runtime_initialized()
+        responses = self._workflow_response_converter.workflow_pause_to_stream_response(
+            event=event,
+            task_id=self._application_generate_entity.task_id,
+            graph_runtime_state=validated_state,
+        )
+        for reason in event.reasons:
+            if isinstance(reason, HumanInputRequired):
+                self._persist_human_input_extra_content(form_id=reason.form_id, node_id=reason.node_id)
+        yield from responses
+        resolved_state: GraphRuntimeState | None = None
+        try:
+            resolved_state = self._ensure_graph_runtime_initialized()
+        except ValueError:
+            resolved_state = None
+
+        with self._database_session() as session:
+            self._save_message(session=session, graph_runtime_state=resolved_state)
+            message = self._get_message(session=session)
+            if message is not None:
+                message.status = MessageStatus.PAUSED
+            self._message_saved_on_pause = True
         self._base_task_pipeline.queue_manager.publish(QueueAdvancedChatMessageEndEvent(), PublishFrom.TASK_PIPELINE)
 
     def _handle_workflow_failed_event(
@@ -614,9 +838,10 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
                 reason=QueueMessageReplaceEvent.MessageReplaceReason.OUTPUT_MODERATION,
             )
 
-        # Save message
-        with self._database_session() as session:
-            self._save_message(session=session, graph_runtime_state=resolved_state)
+        # Save message unless it has already been persisted on pause.
+        if not self._message_saved_on_pause:
+            with self._database_session() as session:
+                self._save_message(session=session, graph_runtime_state=resolved_state)
 
         yield self._message_end_to_stream_response()
 
@@ -625,22 +850,78 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
     ) -> Generator[StreamResponse, None, None]:
         """Handle retriever resources events."""
         self._message_cycle_manager.handle_retriever_resources(event)
-        return
-        yield  # Make this a generator
+        yield from ()
 
     def _handle_annotation_reply_event(
         self, event: QueueAnnotationReplyEvent, **kwargs
     ) -> Generator[StreamResponse, None, None]:
         """Handle annotation reply events."""
         self._message_cycle_manager.handle_annotation_reply(event)
-        return
-        yield  # Make this a generator
+        yield from ()
 
     def _handle_message_replace_event(
         self, event: QueueMessageReplaceEvent, **kwargs
     ) -> Generator[StreamResponse, None, None]:
         """Handle message replace events."""
         yield self._message_cycle_manager.message_replace_to_stream_response(answer=event.text, reason=event.reason)
+
+    def _handle_human_input_form_filled_event(
+        self, event: QueueHumanInputFormFilledEvent, **kwargs
+    ) -> Generator[StreamResponse, None, None]:
+        """Handle human input form filled events."""
+        self._persist_human_input_extra_content(node_id=event.node_id)
+        yield self._workflow_response_converter.human_input_form_filled_to_stream_response(
+            event=event, task_id=self._application_generate_entity.task_id
+        )
+
+    def _handle_human_input_form_timeout_event(
+        self, event: QueueHumanInputFormTimeoutEvent, **kwargs
+    ) -> Generator[StreamResponse, None, None]:
+        """Handle human input form timeout events."""
+        yield self._workflow_response_converter.human_input_form_timeout_to_stream_response(
+            event=event, task_id=self._application_generate_entity.task_id
+        )
+
+    def _persist_human_input_extra_content(self, *, node_id: str | None = None, form_id: str | None = None) -> None:
+        if not self._workflow_run_id or not self._message_id:
+            return
+
+        if form_id is None:
+            if node_id is None:
+                return
+            form_id = self._load_human_input_form_id(node_id=node_id)
+            if form_id is None:
+                logger.warning(
+                    "HumanInput form not found for workflow run %s node %s",
+                    self._workflow_run_id,
+                    node_id,
+                )
+                return
+
+        with self._database_session() as session:
+            exists_stmt = select(HumanInputContent).where(
+                HumanInputContent.workflow_run_id == self._workflow_run_id,
+                HumanInputContent.message_id == self._message_id,
+                HumanInputContent.form_id == form_id,
+            )
+            if session.scalar(exists_stmt) is not None:
+                return
+
+            content = HumanInputContent(
+                workflow_run_id=self._workflow_run_id,
+                message_id=self._message_id,
+                form_id=form_id,
+            )
+            session.add(content)
+
+    def _load_human_input_form_id(self, *, node_id: str) -> str | None:
+        form_repository = HumanInputFormRepositoryImpl(
+            tenant_id=self._workflow_tenant_id,
+        )
+        form = form_repository.get_form(self._workflow_run_id, node_id)
+        if form is None:
+            return None
+        return form.id
 
     def _handle_agent_log_event(self, event: QueueAgentLogEvent, **kwargs) -> Generator[StreamResponse, None, None]:
         """Handle agent log events."""
@@ -659,6 +940,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             QueueWorkflowStartedEvent: self._handle_workflow_started_event,
             QueueWorkflowSucceededEvent: self._handle_workflow_succeeded_event,
             QueueWorkflowPartialSuccessEvent: self._handle_workflow_partial_success_event,
+            QueueWorkflowPausedEvent: self._handle_workflow_paused_event,
             QueueWorkflowFailedEvent: self._handle_workflow_failed_event,
             # Node events
             QueueNodeRetryEvent: self._handle_node_retry_event,
@@ -680,6 +962,8 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             QueueMessageReplaceEvent: self._handle_message_replace_event,
             QueueAdvancedChatMessageEndEvent: self._handle_advanced_chat_message_end_event,
             QueueAgentLogEvent: self._handle_agent_log_event,
+            QueueHumanInputFormFilledEvent: self._handle_human_input_form_filled_event,
+            QueueHumanInputFormTimeoutEvent: self._handle_human_input_form_timeout_event,
         }
 
     def _dispatch_event(
@@ -747,6 +1031,17 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
                 case QueueWorkflowFailedEvent():
                     yield from self._handle_workflow_failed_event(event, trace_manager=trace_manager)
                     break
+                case QueueWorkflowPausedEvent():
+                    yield from self._handle_workflow_paused_event(event)
+                    break
+
+                case QueueWorkflowSucceededEvent():
+                    yield from self._handle_workflow_succeeded_event(event, trace_manager=trace_manager)
+                    break
+
+                case QueueWorkflowPartialSuccessEvent():
+                    yield from self._handle_workflow_partial_success_event(event, trace_manager=trace_manager)
+                    break
 
                 case QueueStopEvent():
                     yield from self._handle_stop_event(event, graph_runtime_state=None, trace_manager=trace_manager)
@@ -772,9 +1067,15 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
 
     def _save_message(self, *, session: Session, graph_runtime_state: GraphRuntimeState | None = None):
         message = self._get_message(session=session)
+        if message is None:
+            return
+
+        if message.status == MessageStatus.PAUSED:
+            message.status = MessageStatus.NORMAL
 
         # If there are assistant files, remove markdown image links from answer
         answer_text = self._task_state.answer
+        answer_text = self._strip_think_blocks(answer_text)
         if self._recorded_files:
             # Remove markdown image links since we're storing files separately
             answer_text = re.sub(r"!\[.*?\]\(.*?\)", "", answer_text).strip()
@@ -815,7 +1116,7 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
                 type=file["type"],
                 transfer_method=file["transfer_method"],
                 url=file["remote_url"],
-                belongs_to="assistant",
+                belongs_to=MessageFileBelongsTo.ASSISTANT,
                 upload_file_id=file["related_id"],
                 created_by_role=CreatorUserRole.ACCOUNT
                 if message.invoke_from in {InvokeFrom.EXPLORE, InvokeFrom.DEBUGGER}
@@ -825,6 +1126,54 @@ class AdvancedChatAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             for file in self._recorded_files
         ]
         session.add_all(message_files)
+
+        # Save generation detail (reasoning/tool calls/sequence) from stream buffer
+        self._save_generation_detail(session=session, message=message)
+
+    @staticmethod
+    def _strip_think_blocks(text: str) -> str:
+        """Remove <think>...</think> blocks (including their content) from text."""
+        if not text or "<think" not in text.lower():
+            return text
+
+        clean_text = re.sub(r"<think[^>]*>.*?</think>", "", text, flags=re.IGNORECASE | re.DOTALL)
+        clean_text = re.sub(r"\n\s*\n", "\n\n", clean_text).strip()
+        return clean_text
+
+    def _save_generation_detail(self, *, session: Session, message: Message) -> None:
+        """
+        Save LLM generation detail for Chatflow using stream event buffer.
+        The buffer records the exact order of events as they streamed,
+        allowing accurate reconstruction of the generation sequence.
+        """
+        # Finalize the stream buffer to flush any pending data
+        self._stream_buffer.finalize()
+
+        # Only save if there's meaningful data
+        if not self._stream_buffer.has_data():
+            return
+
+        reasoning_content = self._stream_buffer.reasoning_content
+        tool_calls = self._stream_buffer.tool_calls
+        sequence = self._stream_buffer.sequence
+
+        # Check if generation detail already exists for this message
+        existing = session.query(LLMGenerationDetail).filter_by(message_id=message.id).first()
+
+        if existing:
+            existing.reasoning_content = json.dumps(reasoning_content) if reasoning_content else None
+            existing.tool_calls = json.dumps(tool_calls) if tool_calls else None
+            existing.sequence = json.dumps(sequence) if sequence else None
+        else:
+            generation_detail = LLMGenerationDetail(
+                tenant_id=self._application_generate_entity.app_config.tenant_id,
+                app_id=self._application_generate_entity.app_config.app_id,
+                message_id=message.id,
+                reasoning_content=json.dumps(reasoning_content) if reasoning_content else None,
+                tool_calls=json.dumps(tool_calls) if tool_calls else None,
+                sequence=json.dumps(sequence) if sequence else None,
+            )
+            session.add(generation_detail)
 
     def _seed_graph_runtime_state_from_queue_manager(self) -> None:
         """Bootstrap the cached runtime state from the queue manager when present."""

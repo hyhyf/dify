@@ -1,26 +1,34 @@
-import type { BlockEnum } from '@/app/components/workflow/types'
+import type { BlockEnum, ConversationVariable, EnvironmentVariable } from '@/app/components/workflow/types'
+import type { WorkflowDraftFeaturesPayload } from '@/contract/console/workflow'
 import type { CommonResponse } from '@/models/common'
 import type { FlowType } from '@/types/common'
 import type {
   ConversationVariableResponse,
   FetchWorkflowDraftResponse,
+  HumanInputFormData,
   NodesDefaultConfigsResponse,
   VarInInspect,
 } from '@/types/workflow'
 import { get, post } from './base'
+import { consoleClient } from './client'
 import { getFlowPrefix } from './utils'
-import { sanitizeWorkflowDraftPayload } from './workflow-payload'
+
+export type { WorkflowDraftFeaturesPayload } from '@/contract/console/workflow'
 
 export const fetchWorkflowDraft = (url: string) => {
   return get(url, {}, { silent: true }) as Promise<FetchWorkflowDraftResponse>
 }
 
-export const syncWorkflowDraft = ({ url, params }: {
+export const syncWorkflowDraft = ({ url, params, canNotSaveEmpty }: {
   url: string
   params: Pick<FetchWorkflowDraftResponse, 'graph' | 'features' | 'environment_variables' | 'conversation_variables'>
+  canNotSaveEmpty?: boolean
 }) => {
-  const sanitized = sanitizeWorkflowDraftPayload(params)
-  return post<CommonResponse & { updated_at: number, hash: string }>(url, { body: sanitized }, { silent: true })
+  // when graph adn skill type changed, it would pass empty nodes array...Temp prevent sync in this case
+  if (params.graph.nodes.length === 0 && canNotSaveEmpty) {
+    throw new Error('Cannot sync workflow draft with zero nodes.')
+  }
+  return post<CommonResponse & { updated_at: number, hash: string }>(url, { body: params }, { silent: true })
 }
 
 export const fetchNodesDefaultConfigs = (url: string) => {
@@ -95,4 +103,69 @@ export const fetchAllInspectVars = async (flowType: FlowType, flowId: string): P
 export const fetchNodeInspectVars = async (flowType: FlowType, flowId: string, nodeId: string): Promise<VarInInspect[]> => {
   const { items } = (await get(`${getFlowPrefix(flowType)}/${flowId}/workflows/draft/nodes/${nodeId}/variables`)) as { items: VarInInspect[] }
   return items
+}
+
+// Environment Variables API
+export const fetchEnvironmentVariables = async (appId: string): Promise<EnvironmentVariable[]> => {
+  const response = await consoleClient.workflowDraft.environmentVariables({
+    params: { appId },
+  })
+  return response.items
+}
+
+export const updateEnvironmentVariables = ({ appId, environmentVariables }: {
+  appId: string
+  environmentVariables: EnvironmentVariable[]
+}) => {
+  return consoleClient.workflowDraft.updateEnvironmentVariables({
+    params: { appId },
+    body: { environment_variables: environmentVariables },
+  })
+}
+
+export const updateConversationVariables = ({ appId, conversationVariables }: {
+  appId: string
+  conversationVariables: ConversationVariable[]
+}) => {
+  return consoleClient.workflowDraft.updateConversationVariables({
+    params: { appId },
+    body: { conversation_variables: conversationVariables },
+  })
+}
+
+export const updateFeatures = ({ appId, features }: {
+  appId: string
+  features: WorkflowDraftFeaturesPayload
+}) => {
+  return consoleClient.workflowDraft.updateFeatures({
+    params: { appId },
+    body: { features },
+  })
+}
+
+export const submitHumanInputForm = (token: string, data: {
+  inputs: Record<string, string>
+  action: string
+}) => {
+  return post(`/form/human_input/${token}`, { body: data })
+}
+
+export const fetchHumanInputNodeStepRunForm = (
+  url: string,
+  data: {
+    inputs: Record<string, string>
+  },
+) => {
+  return post<HumanInputFormData>(`${url}/preview`, { body: data })
+}
+
+export const submitHumanInputNodeStepRunForm = (
+  url: string,
+  data: {
+    inputs: Record<string, string> | undefined
+    form_inputs: Record<string, string> | undefined
+    action: string
+  },
+) => {
+  return post<CommonResponse>(`${url}/run`, { body: data })
 }

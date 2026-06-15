@@ -44,7 +44,7 @@ export type DSLImportResponse = {
   current_dsl_version?: string
   imported_dsl_version?: string
   error: string
-  leaked_dependencies: Dependency[]
+  leaked_dependencies?: Dependency[]
 }
 
 export type AppTemplatesResponse = {
@@ -113,6 +113,20 @@ export type AppVoicesListResponse = [{
   name: string
   value: string
 }]
+
+export type WorkflowOnlineUser = {
+  user_id?: string
+  username?: string
+  avatar?: string | null
+  sid?: string
+}
+
+export type WorkflowOnlineUsersResponse = {
+  data: Array<{
+    workflow_id: string
+    users: WorkflowOnlineUser[]
+  }>
+}
 
 export type TracingStatus = {
   enabled: boolean

@@ -9,13 +9,15 @@ import {
   PortalToFollowElemContent,
   PortalToFollowElemTrigger,
 } from '@/app/components/base/portal-to-follow-elem'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { ModelTypeEnum } from '@/app/components/header/account-setting/model-provider-page/declarations'
 import { useModelListAndDefaultModelAndCurrentProviderAndModel } from '@/app/components/header/account-setting/model-provider-page/hooks'
+import { STORAGE_KEYS } from '@/config/storage-keys'
 import useTheme from '@/hooks/use-theme'
 import { useGenerateStructuredOutputRules } from '@/service/use-common'
 import { ModelModeType, Theme } from '@/types/app'
 import { cn } from '@/utils/classnames'
+import { storage } from '@/utils/storage'
 import { useMittContext } from '../visual-editor/context'
 import { useVisualEditorStore } from '../visual-editor/store'
 import { SchemaGeneratorDark, SchemaGeneratorLight } from './assets'
@@ -36,9 +38,7 @@ const JsonSchemaGenerator: FC<JsonSchemaGeneratorProps> = ({
   onApply,
   crossAxisOffset,
 }) => {
-  const localModel = localStorage.getItem('auto-gen-model')
-    ? JSON.parse(localStorage.getItem('auto-gen-model') as string) as Model
-    : null
+  const localModel = storage.get<Model>(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL)
   const [open, setOpen] = useState(false)
   const [view, setView] = useState(GeneratorView.promptEditor)
   const [model, setModel] = useState<Model>(localModel || {
@@ -60,9 +60,7 @@ const JsonSchemaGenerator: FC<JsonSchemaGeneratorProps> = ({
 
   useEffect(() => {
     if (defaultModel) {
-      const localModel = localStorage.getItem('auto-gen-model')
-        ? JSON.parse(localStorage.getItem('auto-gen-model') || '')
-        : null
+      const localModel = storage.get<Model>(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL)
       if (localModel) {
         setModel(localModel)
       }
@@ -95,7 +93,7 @@ const JsonSchemaGenerator: FC<JsonSchemaGeneratorProps> = ({
       mode: newValue.mode as ModelModeType,
     }
     setModel(newModel)
-    localStorage.setItem('auto-gen-model', JSON.stringify(newModel))
+    storage.set(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL, newModel)
   }, [model, setModel])
 
   const handleCompletionParamsChange = useCallback((newParams: FormValue) => {
@@ -104,7 +102,7 @@ const JsonSchemaGenerator: FC<JsonSchemaGeneratorProps> = ({
       completion_params: newParams as CompletionParams,
     }
     setModel(newModel)
-    localStorage.setItem('auto-gen-model', JSON.stringify(newModel))
+    storage.set(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL, newModel)
   }, [model, setModel])
 
   const { mutateAsync: generateStructuredOutputRules, isPending: isGenerating } = useGenerateStructuredOutputRules()
@@ -112,10 +110,7 @@ const JsonSchemaGenerator: FC<JsonSchemaGeneratorProps> = ({
   const generateSchema = useCallback(async () => {
     const { output, error } = await generateStructuredOutputRules({ instruction, model_config: model! })
     if (error) {
-      Toast.notify({
-        type: 'error',
-        message: error,
-      })
+      toast.error(error)
       setSchema(null)
       setView(GeneratorView.promptEditor)
       return

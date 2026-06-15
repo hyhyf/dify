@@ -13,8 +13,8 @@ from sqlalchemy.orm import Session
 from werkzeug.http import parse_options_header
 
 from constants import AUDIO_EXTENSIONS, DOCUMENT_EXTENSIONS, IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
-from core.file import File, FileBelongsTo, FileTransferMethod, FileType, FileUploadConfig, helpers
 from core.helper import ssrf_proxy
+from dify_graph.file import File, FileBelongsTo, FileTransferMethod, FileType, FileUploadConfig, helpers
 from extensions.ext_database import db
 from models import MessageFile, ToolFile, UploadFile
 
@@ -424,13 +424,11 @@ def _build_from_datasource_file(
     datasource_file_id = mapping.get("datasource_file_id")
     if not datasource_file_id:
         raise ValueError(f"DatasourceFile {datasource_file_id} not found")
-    datasource_file = (
-        db.session.query(UploadFile)
-        .where(
+    datasource_file = db.session.scalar(
+        select(UploadFile).where(
             UploadFile.id == datasource_file_id,
             UploadFile.tenant_id == tenant_id,
         )
-        .first()
     )
 
     if datasource_file is None:
@@ -488,7 +486,7 @@ def _is_file_valid_with_config(
     if (
         input_file_type == FileType.CUSTOM
         and config.allowed_file_extensions is not None
-        and file_extension not in config.allowed_file_extensions
+        and file_extension.lower() not in {ext.lower() for ext in config.allowed_file_extensions}
     ):
         return False
 

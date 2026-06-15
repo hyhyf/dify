@@ -1,12 +1,17 @@
 import type { StartNodeType } from './nodes/start/types'
 import type { CommonNodeType, InputVar, Node } from './types'
 import type { PromptVariable } from '@/models/debug'
+import type { WorkflowDraftFeaturesPayload } from '@/service/workflow'
 import {
   memo,
   useCallback,
 } from 'react'
 import { useNodes } from 'reactflow'
+import { useStore as useAppStore } from '@/app/components/app/store'
+import { useFeaturesStore } from '@/app/components/base/features/hooks'
 import NewFeaturePanel from '@/app/components/base/features/new-feature-panel'
+import { webSocketClient } from '@/app/components/workflow/collaboration/core/websocket-manager'
+import { updateFeatures } from '@/service/workflow'
 import {
   useIsChatMode,
   useNodesReadOnly,
@@ -18,11 +23,13 @@ import { InputVarType } from './types'
 
 const Features = () => {
   const setShowFeaturesPanel = useStore(s => s.setShowFeaturesPanel)
+  const appId = useStore(s => s.appId)
+  const isSandboxRuntime = useAppStore(s => s.appDetail?.runtime_type === 'sandboxed')
   const isChatMode = useIsChatMode()
   const { nodesReadOnly } = useNodesReadOnly()
   const { handleSyncWorkflowDraft } = useNodesSyncDraft()
+  const featuresStore = useFeaturesStore()
   const nodes = useNodes<CommonNodeType>()
-
   const startNode = nodes.find(node => node.data.type === 'start')
   const { id, data } = startNode as Node<StartNodeType>
   const { handleAddVariable } = useConfig(id, data)
@@ -40,10 +47,49 @@ const Features = () => {
     handleAddVariable(startNodeVariable)
   }
 
-  const handleFeaturesChange = useCallback(() => {
-    handleSyncWorkflowDraft()
+  const handleFeaturesChange = useCallback(async () => {
+    if (!appId || !featuresStore)
+      return
+
+    try {
+      const currentFeatures = featuresStore.getState().features
+      const shouldSyncDraft = isSandboxRuntime || currentFeatures.sandbox?.enabled === true
+
+      // Transform features to match the expected server format (same as doSyncWorkflowDraft)
+      const transformedFeatures: WorkflowDraftFeaturesPayload = {
+        opening_statement: currentFeatures.opening?.enabled ? (currentFeatures.opening?.opening_statement || '') : '',
+        suggested_questions: currentFeatures.opening?.enabled ? (currentFeatures.opening?.suggested_questions || []) : [],
+        suggested_questions_after_answer: currentFeatures.suggested,
+        text_to_speech: currentFeatures.text2speech,
+        speech_to_text: currentFeatures.speech2text,
+        retriever_resource: currentFeatures.citation,
+        sensitive_word_avoidance: currentFeatures.moderation,
+        file_upload: currentFeatures.file,
+        sandbox: currentFeatures.sandbox,
+      }
+
+      await updateFeatures({
+        appId,
+        features: transformedFeatures,
+      })
+
+      if (shouldSyncDraft)
+        handleSyncWorkflowDraft(true, true)
+
+      // Emit update event to other connected clients
+      const socket = webSocketClient.getSocket(appId)
+      if (socket) {
+        socket.emit('collaboration_event', {
+          type: 'vars_and_features_update',
+        })
+      }
+    }
+    catch (error) {
+      console.error('Failed to update features:', error)
+    }
+
     setShowFeaturesPanel(true)
-  }, [handleSyncWorkflowDraft, setShowFeaturesPanel])
+  }, [appId, featuresStore, handleSyncWorkflowDraft, isSandboxRuntime, setShowFeaturesPanel])
 
   return (
     <NewFeaturePanel

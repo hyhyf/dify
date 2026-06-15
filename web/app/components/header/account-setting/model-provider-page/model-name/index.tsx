@@ -1,6 +1,8 @@
 import type { FC, PropsWithChildren } from 'react'
 import type { ModelItem } from '../declarations'
 import { cn } from '@/utils/classnames'
+import { ModelFeatureEnum } from '../declarations'
+
 import { useLanguage } from '../hooks'
 import ModelBadge from '../model-badge'
 import FeatureIcon from '../model-selector/feature-icon'
@@ -39,7 +41,7 @@ const ModelName: FC<ModelNameProps> = ({
   if (!modelItem)
     return null
   return (
-    <div className={cn('system-sm-regular flex items-center gap-0.5 overflow-hidden truncate text-ellipsis text-components-input-text-filled', className)}>
+    <div className={cn('flex items-center gap-0.5 overflow-hidden truncate text-ellipsis text-components-input-text-filled system-sm-regular', className)}>
       <div
         className="truncate"
         title={modelItem.label[language] || modelItem.label.en_US}
@@ -69,7 +71,12 @@ const ModelName: FC<ModelNameProps> = ({
           )
         }
         {
-          showFeatures && modelItem.features?.map(feature => (
+          showFeatures && modelItem.features?.reduce((acc, feature) => {
+            if (acc.some(f => [ModelFeatureEnum.toolCall, ModelFeatureEnum.multiToolCall, ModelFeatureEnum.streamToolCall].includes(f)) && [ModelFeatureEnum.toolCall, ModelFeatureEnum.multiToolCall, ModelFeatureEnum.streamToolCall].includes(feature)) {
+              return acc
+            }
+            return [...acc, feature]
+          }, [] as ModelFeatureEnum[]).map(feature => (
             <FeatureIcon
               key={feature}
               feature={feature}

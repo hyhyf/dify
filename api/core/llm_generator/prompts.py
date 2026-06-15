@@ -304,9 +304,10 @@ Your task is to convert simple user descriptions into properly formatted JSON Sc
 Now, generate a JSON Schema based on my description
 """  # noqa: E501
 
-STRUCTURED_OUTPUT_PROMPT = """You’re a helpful AI assistant. You could answer questions and output in JSON format.
+STRUCTURED_OUTPUT_PROMPT = """You’re an AI that accepts any input but only output in JSON. You must always output in JSON format.
 constraints:
     - You must output in JSON format.
+    - You mustn't output in plain text.
     - Do not output boolean value, use string type instead.
     - Do not output integer or float value, use number type instead.
 eg:
@@ -321,6 +322,29 @@ eg:
 Here is the JSON schema:
 {{schema}}
 """  # noqa: E501
+
+STRUCTURED_OUTPUT_TOOL_CALL_PROMPT = """## MANDATORY INSTRUCTION — read before responding
+
+You have EXACTLY ONE tool: `structured_output`.  You MUST call it with the correct arguments to provide your final answer.
+
+### Rules (violation = invalid response)
+1. Call `structured_output` — this is the ONLY action you can take.
+2. Do NOT output raw JSON text — always use the tool call.
+3. Do NOT call any other tool (bash, python, code_interpreter, etc.) — they do NOT exist and will be rejected.
+4. Do NOT ask clarifying questions or say you cannot answer — extract the best answer from the available context and call `structured_output`.
+
+### About conversation history
+The messages above may contain calls to tools like `bash`, `python`, `code_interpreter`, etc.
+Those calls happened in PREVIOUS steps that have already finished. The results are shown for your reference.
+You CANNOT execute those tools — they are no longer available. Read their outputs as context, then summarise your answer into `structured_output`.
+"""  # noqa: E501
+
+STRUCTURED_OUTPUT_FINAL_TURN_REMINDER = (
+    "[SYSTEM] This is the FINAL turn. No further interaction is possible after this. "
+    "You must call `structured_output` NOW with your best answer based on the conversation above. "
+    "Do NOT call bash, python, or any other tool. Do NOT ask questions. Just call `structured_output`. "
+    "All output files are located under the `output/` directory only, with no path prefix."
+)
 
 LLM_MODIFY_PROMPT_SYSTEM = """
 Both your input and output should be in JSON format.
@@ -434,3 +458,22 @@ INSTRUCTION_GENERATE_TEMPLATE_PROMPT = """The output of this prompt is not as ex
 You should edit the prompt according to the IDEAL OUTPUT."""
 
 INSTRUCTION_GENERATE_TEMPLATE_CODE = """Please fix the errors in the {{#error_message#}}."""
+
+DEFAULT_GENERATOR_SUMMARY_PROMPT = (
+    """Summarize the following content. Extract only the key information and main points. """
+    """Remove redundant details.
+
+Requirements:
+1. Write a concise summary in plain text
+2. You must write in {language}. No language other than {language} should be used.
+3. Focus on important facts, concepts, and details
+4. If images are included, describe their key information
+5. Do not use words like "好的", "ok", "I understand", "This text discusses", "The content mentions"
+6. Write directly without extra words
+7. If there is not enough content to generate a meaningful summary, 
+   return an empty string without any explanation or prompt
+
+Output only the summary text. Start summarizing now:
+
+"""
+)

@@ -138,6 +138,8 @@ class FeatureModel(BaseModel):
     is_allow_transfer_workspace: bool = True
     trigger_event: Quota = Quota(usage=0, limit=3000, reset_date=0)
     api_rate_limit: Quota = Quota(usage=0, limit=5000, reset_date=0)
+    # Controls whether email delivery is allowed for HumanInput nodes.
+    human_input_email_delivery_enabled: bool = False
     # pydantic configs
     model_config = ConfigDict(protected_namespaces=())
     knowledge_pipeline: KnowledgePipeline = KnowledgePipeline()
@@ -162,6 +164,7 @@ class SystemFeatureModel(BaseModel):
     enable_email_code_login: bool = False
     enable_email_password_login: bool = True
     enable_social_oauth_login: bool = False
+    enable_collaboration_mode: bool = False
     is_allow_register: bool = False
     is_allow_create_workspace: bool = False
     is_email_setup: bool = False
@@ -174,6 +177,7 @@ class SystemFeatureModel(BaseModel):
     trial_models: list[str] = []
     enable_trial_app: bool = False
     enable_explore_banner: bool = False
+    enable_creators_platform: bool = False
 
 
 class FeatureService:
@@ -191,6 +195,11 @@ class FeatureService:
             features.knowledge_pipeline.publish_enabled = True
             cls._fulfill_params_from_workspace_info(features, tenant_id)
 
+        features.human_input_email_delivery_enabled = cls._resolve_human_input_email_delivery_enabled(
+            features=features,
+            tenant_id=tenant_id,
+        )
+
         return features
 
     @classmethod
@@ -202,6 +211,17 @@ class FeatureService:
             knowledge_rate_limit.limit = limit_info.get("limit", 10)
             knowledge_rate_limit.subscription_plan = limit_info.get("subscription_plan", CloudPlan.SANDBOX)
         return knowledge_rate_limit
+
+    @classmethod
+    def _resolve_human_input_email_delivery_enabled(cls, *, features: FeatureModel, tenant_id: str | None) -> bool:
+        if dify_config.ENTERPRISE_ENABLED or not dify_config.BILLING_ENABLED:
+            return True
+        if not tenant_id:
+            return False
+        return features.billing.enabled and features.billing.subscription.plan in (
+            CloudPlan.PROFESSIONAL,
+            CloudPlan.TEAM,
+        )
 
     @classmethod
     def get_system_features(cls, is_authenticated: bool = False) -> SystemFeatureModel:
@@ -219,6 +239,9 @@ class FeatureService:
         if dify_config.MARKETPLACE_ENABLED:
             system_features.enable_marketplace = True
 
+        if dify_config.CREATORS_PLATFORM_FEATURES_ENABLED:
+            system_features.enable_creators_platform = True
+
         return system_features
 
     @classmethod
@@ -226,6 +249,7 @@ class FeatureService:
         system_features.enable_email_code_login = dify_config.ENABLE_EMAIL_CODE_LOGIN
         system_features.enable_email_password_login = dify_config.ENABLE_EMAIL_PASSWORD_LOGIN
         system_features.enable_social_oauth_login = dify_config.ENABLE_SOCIAL_OAUTH_LOGIN
+        system_features.enable_collaboration_mode = dify_config.ENABLE_COLLABORATION_MODE
         system_features.is_allow_register = dify_config.ALLOW_REGISTER
         system_features.is_allow_create_workspace = dify_config.ALLOW_CREATE_WORKSPACE
         system_features.is_email_setup = dify_config.MAIL_TYPE is not None and dify_config.MAIL_TYPE != ""
@@ -361,14 +385,19 @@ class FeatureService:
             )
             features.webapp_auth.sso_config.protocol = enterprise_info.get("SSOEnforcedForWebProtocol", "")
 
-        if is_authenticated and (license_info := enterprise_info.get("License")):
+        # SECURITY NOTE: Only license *status* is exposed to unauthenticated callers
+        # so the login page can detect an expired/inactive license after force-logout.
+        # All other license details (expiry date, workspace usage) remain auth-gated.
+        # This behavior reflects prior internal review of information-leakage risks.
+        if license_info := enterprise_info.get("License"):
             features.license.status = LicenseStatus(license_info.get("status", LicenseStatus.INACTIVE))
-            features.license.expired_at = license_info.get("expiredAt", "")
 
-            if workspaces_info := license_info.get("workspaces"):
-                features.license.workspaces.enabled = workspaces_info.get("enabled", False)
-                features.license.workspaces.limit = workspaces_info.get("limit", 0)
-                features.license.workspaces.size = workspaces_info.get("used", 0)
+            if is_authenticated:
+                features.license.expired_at = license_info.get("expiredAt", "")
+                if workspaces_info := license_info.get("workspaces"):
+                    features.license.workspaces.enabled = workspaces_info.get("enabled", False)
+                    features.license.workspaces.limit = workspaces_info.get("limit", 0)
+                    features.license.workspaces.size = workspaces_info.get("used", 0)
 
         if "PluginInstallationPermission" in enterprise_info:
             plugin_installation_info = enterprise_info["PluginInstallationPermission"]

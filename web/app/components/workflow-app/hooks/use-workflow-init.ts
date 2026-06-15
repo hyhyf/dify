@@ -12,6 +12,7 @@ import {
   useWorkflowStore,
 } from '@/app/components/workflow/store'
 import { BlockEnum } from '@/app/components/workflow/types'
+import { STORAGE_KEYS } from '@/config/storage-keys'
 import { useWorkflowConfig } from '@/service/use-workflow'
 import {
   fetchNodesDefaultConfigs,
@@ -20,6 +21,8 @@ import {
   syncWorkflowDraft,
 } from '@/service/workflow'
 import { AppModeEnum } from '@/types/app'
+import { storage } from '@/utils/storage'
+import { setSandboxMigrationDismissed } from '../utils/sandbox-migration-storage'
 import { useWorkflowTemplate } from './use-workflow-template'
 
 const hasConnectedUserInput = (nodes: Node[] = [], edges: Edge[] = []): boolean => {
@@ -44,7 +47,7 @@ export const useWorkflowInit = () => {
   const [isLoading, setIsLoading] = useState(true)
   useEffect(() => {
     workflowStore.setState({ appId: appDetail.id, appName: appDetail.name })
-  }, [appDetail.id, workflowStore])
+  }, [appDetail.id, appDetail.name, workflowStore])
 
   const handleUpdateWorkflowFileUploadConfig = useCallback((config: FileUploadConfigResponse) => {
     const { setFileUploadConfig } = workflowStore.getState()
@@ -61,7 +64,7 @@ export const useWorkflowInit = () => {
       setData(res)
       workflowStore.setState({
         envSecrets: (res.environment_variables || []).filter(env => env.value_type === 'secret').reduce((acc, env) => {
-          acc[env.id] = env.value
+          acc[env.id] = typeof env.value === 'string' ? env.value : JSON.stringify(env.value)
           return acc
         }, {} as Record<string, string>),
         environmentVariables: res.environment_variables?.map(env => env.value_type === 'secret' ? { ...env, value: '[__HIDDEN__]' } : env) || [],
@@ -85,6 +88,14 @@ export const useWorkflowInit = () => {
             const nodesData = isAdvancedChat ? nodesTemplate : []
             const edgesData = isAdvancedChat ? edgesTemplate : []
 
+            const runtimeStorageKey = `${STORAGE_KEYS.LOCAL.WORKFLOW.SANDBOX_RUNTIME_PREFIX}${appDetail.id}`
+            const enableSandboxRuntime = storage.getBoolean(runtimeStorageKey) === true
+            if (enableSandboxRuntime)
+              storage.remove(runtimeStorageKey)
+
+            if (!enableSandboxRuntime)
+              setSandboxMigrationDismissed(appDetail.id)
+
             syncWorkflowDraft({
               url: `/apps/${appDetail.id}/workflows/draft`,
               params: {
@@ -94,12 +105,14 @@ export const useWorkflowInit = () => {
                 },
                 features: {
                   retriever_resource: { enabled: true },
+                  sandbox: { enabled: enableSandboxRuntime },
                 },
                 environment_variables: [],
                 conversation_variables: [],
               },
             }).then((res) => {
               workflowStore.getState().setDraftUpdatedAt(res.updated_at)
+              setSyncWorkflowDraftHash(res.hash)
               handleGetInitialWorkflowData()
             })
           }
@@ -110,6 +123,7 @@ export const useWorkflowInit = () => {
 
   useEffect(() => {
     handleGetInitialWorkflowData()
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
   const handleFetchPreloadData = useCallback(async () => {
@@ -118,10 +132,12 @@ export const useWorkflowInit = () => {
       const publishedWorkflow = await fetchPublishedWorkflow(`/apps/${appDetail?.id}/workflows/publish`)
       workflowStore.setState({
         nodesDefaultConfigs: nodesDefaultConfigsData.reduce((acc, block) => {
-          if (!acc[block.type])
-            acc[block.type] = { ...block.config }
+          if (!acc[block.type]) {
+            const cfg = block.config
+            acc[block.type] = (cfg && typeof cfg === 'object' && !Array.isArray(cfg) ? { ...cfg } : {}) as Record<string, unknown>
+          }
           return acc
-        }, {} as Record<string, any>),
+        }, {} as Record<string, Record<string, unknown>>),
       })
       workflowStore.getState().setPublishedAt(publishedWorkflow?.created_at)
       const graph = publishedWorkflow?.graph
@@ -150,5 +166,6 @@ export const useWorkflowInit = () => {
     data,
     isLoading: isLoading || isFileUploadConfigLoading,
     fileUploadConfigResponse,
+    reload: handleGetInitialWorkflowData,
   }
 }

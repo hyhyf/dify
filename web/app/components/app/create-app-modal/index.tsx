@@ -1,34 +1,44 @@
 'use client'
 
 import type { AppIconSelection } from '../../base/app-icon-picker'
-import { RiArrowRightLine, RiArrowRightSLine, RiCommandLine, RiCornerDownLeftLine, RiExchange2Fill } from '@remixicon/react'
-
+import type { RuntimeMode } from '@/types/app'
+import { RiArrowRightLine, RiArrowRightSLine, RiExchange2Fill } from '@remixicon/react'
 import { useDebounceFn, useKeyPress } from 'ahooks'
-import Image from 'next/image'
-import { useRouter } from 'next/navigation'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useContext } from 'use-context-selector'
 import { trackEvent } from '@/app/components/base/amplitude'
+
 import AppIcon from '@/app/components/base/app-icon'
+import Badge from '@/app/components/base/badge'
 import Button from '@/app/components/base/button'
 import Divider from '@/app/components/base/divider'
 import FullScreenModal from '@/app/components/base/fullscreen-modal'
 import { BubbleTextMod, ChatBot, ListSparkle, Logic } from '@/app/components/base/icons/src/vender/solid/communication'
 import Input from '@/app/components/base/input'
 import Textarea from '@/app/components/base/textarea'
-import { ToastContext } from '@/app/components/base/toast'
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/app/components/base/ui/select'
+import { toast } from '@/app/components/base/ui/toast'
 import AppsFull from '@/app/components/billing/apps-full-in-dialog'
-import { NEED_REFRESH_APP_LIST_KEY } from '@/config'
+import { MARKETPLACE_URL_PREFIX, NEED_REFRESH_APP_LIST_KEY } from '@/config'
+import { STORAGE_KEYS } from '@/config/storage-keys'
 import { useAppContext } from '@/context/app-context'
 import { useProviderContext } from '@/context/provider-context'
 import useTheme from '@/hooks/use-theme'
+import { useRouter } from '@/next/navigation'
 import { createApp } from '@/service/apps'
 import { AppModeEnum } from '@/types/app'
 import { getRedirection } from '@/utils/app-redirection'
 import { cn } from '@/utils/classnames'
+import { storage } from '@/utils/storage'
 import { basePath } from '@/utils/var'
 import AppIconPicker from '../../base/app-icon-picker'
+import ShortcutsName from '../../workflow/shortcuts-name'
 
 type CreateAppProps = {
   onSuccess: () => void
@@ -37,17 +47,35 @@ type CreateAppProps = {
   defaultAppMode?: AppModeEnum
 }
 
+type RuntimeOption = {
+  label: string
+  value: RuntimeMode
+  description: string
+  recommended?: boolean
+}
+
+const marketplaceTemplatesUrl = `${MARKETPLACE_URL_PREFIX.replace(/\/$/, '')}/templates`
+
+function isBeginnerAppMode(mode: AppModeEnum) {
+  return mode === AppModeEnum.CHAT || mode === AppModeEnum.AGENT_CHAT || mode === AppModeEnum.COMPLETION
+}
+
 function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }: CreateAppProps) {
   const { t } = useTranslation()
   const { push } = useRouter()
-  const { notify } = useContext(ToastContext)
 
-  const [appMode, setAppMode] = useState<AppModeEnum>(defaultAppMode || AppModeEnum.ADVANCED_CHAT)
+  const initialAppMode = defaultAppMode || AppModeEnum.ADVANCED_CHAT
+  const [appMode, setAppMode] = useState<AppModeEnum>(initialAppMode)
   const [appIcon, setAppIcon] = useState<AppIconSelection>({ type: 'emoji', icon: '🤖', background: '#FFEAD5' })
   const [showAppIconPicker, setShowAppIconPicker] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
-  const [isAppTypeExpanded, setIsAppTypeExpanded] = useState(false)
+  const [isAppTypeExpanded, setIsAppTypeExpanded] = useState(() => isBeginnerAppMode(initialAppMode))
+  const [runtimeMode, setRuntimeMode] = useState<RuntimeMode>(() => {
+    if (initialAppMode !== AppModeEnum.WORKFLOW && initialAppMode !== AppModeEnum.ADVANCED_CHAT)
+      return 'classic'
+    return 'sandboxed'
+  })
 
   const { plan, enableBilling } = useProviderContext()
   const isAppsFull = (enableBilling && plan.usage.buildApps >= plan.total.buildApps)
@@ -55,18 +83,21 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
 
   const isCreatingRef = useRef(false)
 
-  useEffect(() => {
-    if (appMode === AppModeEnum.CHAT || appMode === AppModeEnum.AGENT_CHAT || appMode === AppModeEnum.COMPLETION)
+  const selectAppMode = useCallback((mode: AppModeEnum) => {
+    setAppMode(mode)
+    if (isBeginnerAppMode(mode))
       setIsAppTypeExpanded(true)
-  }, [appMode])
+    if (mode !== AppModeEnum.WORKFLOW && mode !== AppModeEnum.ADVANCED_CHAT)
+      setRuntimeMode('classic')
+  }, [])
 
   const onCreate = useCallback(async () => {
     if (!appMode) {
-      notify({ type: 'error', message: t('newApp.appTypeRequired', { ns: 'app' }) })
+      toast.error(t('newApp.appTypeRequired', { ns: 'app' }))
       return
     }
     if (!name.trim()) {
-      notify({ type: 'error', message: t('newApp.nameNotEmpty', { ns: 'app' }) })
+      toast.error(t('newApp.nameNotEmpty', { ns: 'app' }))
       return
     }
     if (isCreatingRef.current)
@@ -82,26 +113,26 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
         mode: appMode,
       })
 
+      if (runtimeMode === 'sandboxed' && (appMode === AppModeEnum.WORKFLOW || appMode === AppModeEnum.ADVANCED_CHAT))
+        storage.set(`${STORAGE_KEYS.LOCAL.WORKFLOW.SANDBOX_RUNTIME_PREFIX}${app.id}`, true)
+
       // Track app creation success
       trackEvent('create_app', {
         app_mode: appMode,
         description,
       })
 
-      notify({ type: 'success', message: t('newApp.appCreated', { ns: 'app' }) })
+      toast.success(t('newApp.appCreated', { ns: 'app' }))
       onSuccess()
       onClose()
       localStorage.setItem(NEED_REFRESH_APP_LIST_KEY, '1')
       getRedirection(isCurrentWorkspaceEditor, app, push)
     }
     catch (e: any) {
-      notify({
-        type: 'error',
-        message: e.message || t('newApp.appCreateFailed', { ns: 'app' }),
-      })
+      toast.error(e.message || t('newApp.appCreateFailed', { ns: 'app' }))
     }
     isCreatingRef.current = false
-  }, [name, notify, t, appMode, appIcon, description, onSuccess, onClose, push, isCurrentWorkspaceEditor])
+  }, [name, t, appMode, appIcon, description, onSuccess, onClose, push, isCurrentWorkspaceEditor, runtimeMode])
 
   const { run: handleCreateApp } = useDebounceFn(onCreate, { wait: 300 })
   useKeyPress(['meta.enter', 'ctrl.enter'], () => {
@@ -116,10 +147,10 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
           <div className="px-10">
             <div className="h-6 w-full 2xl:h-[139px]" />
             <div className="pb-6 pt-1">
-              <span className="title-2xl-semi-bold text-text-primary">{t('newApp.startFromBlank', { ns: 'app' })}</span>
+              <span className="text-text-primary title-2xl-semi-bold">{t('newApp.startFromBlank', { ns: 'app' })}</span>
             </div>
             <div className="mb-2 leading-6">
-              <span className="system-sm-semibold text-text-secondary">{t('newApp.chooseAppType', { ns: 'app' })}</span>
+              <span className="text-text-secondary system-sm-semibold">{t('newApp.chooseAppType', { ns: 'app' })}</span>
             </div>
             <div className="flex w-[660px] flex-col gap-4">
               <div>
@@ -134,7 +165,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                       </div>
                     )}
                     onClick={() => {
-                      setAppMode(AppModeEnum.WORKFLOW)
+                      selectAppMode(AppModeEnum.WORKFLOW)
                     }}
                   />
                   <AppTypeCard
@@ -147,7 +178,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                       </div>
                     )}
                     onClick={() => {
-                      setAppMode(AppModeEnum.ADVANCED_CHAT)
+                      selectAppMode(AppModeEnum.ADVANCED_CHAT)
                     }}
                   />
                 </div>
@@ -159,7 +190,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                     className="flex cursor-pointer items-center border-0 bg-transparent p-0"
                     onClick={() => setIsAppTypeExpanded(!isAppTypeExpanded)}
                   >
-                    <span className="system-2xs-medium-uppercase text-text-tertiary">{t('newApp.forBeginners', { ns: 'app' })}</span>
+                    <span className="text-text-tertiary system-2xs-medium-uppercase">{t('newApp.forBeginners', { ns: 'app' })}</span>
                     <RiArrowRightSLine className={`ml-1 h-4 w-4 text-text-tertiary transition-transform ${isAppTypeExpanded ? 'rotate-90' : ''}`} />
                   </button>
                 </div>
@@ -175,7 +206,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                         </div>
                       )}
                       onClick={() => {
-                        setAppMode(AppModeEnum.CHAT)
+                        selectAppMode(AppModeEnum.CHAT)
                       }}
                     />
                     <AppTypeCard
@@ -188,7 +219,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                         </div>
                       )}
                       onClick={() => {
-                        setAppMode(AppModeEnum.AGENT_CHAT)
+                        selectAppMode(AppModeEnum.AGENT_CHAT)
                       }}
                     />
                     <AppTypeCard
@@ -201,7 +232,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                         </div>
                       )}
                       onClick={() => {
-                        setAppMode(AppModeEnum.COMPLETION)
+                        selectAppMode(AppModeEnum.COMPLETION)
                       }}
                     />
                   </div>
@@ -211,7 +242,7 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
               <div className="flex items-center space-x-3">
                 <div className="flex-1">
                   <div className="mb-1 flex h-6 items-center">
-                    <label className="system-sm-semibold text-text-secondary">{t('newApp.captionName', { ns: 'app' })}</label>
+                    <label className="text-text-secondary system-sm-semibold">{t('newApp.captionName', { ns: 'app' })}</label>
                   </div>
                   <Input
                     value={name}
@@ -242,8 +273,8 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
               </div>
               <div>
                 <div className="mb-1 flex h-6 items-center">
-                  <label className="system-sm-semibold text-text-secondary">{t('newApp.captionDescription', { ns: 'app' })}</label>
-                  <span className="system-xs-regular ml-1 text-text-tertiary">
+                  <label className="text-text-secondary system-sm-semibold">{t('newApp.captionDescription', { ns: 'app' })}</label>
+                  <span className="ml-1 text-text-tertiary system-xs-regular">
                     (
                     {t('newApp.optional', { ns: 'app' })}
                     )
@@ -256,23 +287,80 @@ function CreateApp({ onClose, onSuccess, onCreateFromTemplate, defaultAppMode }:
                   onChange={e => setDescription(e.target.value)}
                 />
               </div>
+
+              {(appMode === AppModeEnum.WORKFLOW || appMode === AppModeEnum.ADVANCED_CHAT) && (
+                <div>
+                  <div className="mb-2 text-text-secondary system-sm-semibold">
+                    {t('newApp.runtimeLabel', { ns: 'app' })}
+                  </div>
+                  <Select
+                    value={runtimeMode}
+                    onValueChange={value => setRuntimeMode(value as RuntimeMode)}
+                  >
+                    <SelectTrigger className="px-3">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent className="z-[60]" popupClassName="w-full">
+                      {([
+                        {
+                          label: t('newApp.runtimeOptionSandboxed', { ns: 'app' }),
+                          value: 'sandboxed' as const,
+                          description: t('newApp.runtimeOptionSandboxedDescription', { ns: 'app' }),
+                          recommended: true,
+                        },
+                        {
+                          label: t('newApp.runtimeOptionClassic', { ns: 'app' }),
+                          value: 'classic' as const,
+                          description: t('newApp.runtimeOptionClassicDescription', { ns: 'app' }),
+                        },
+                      ] satisfies RuntimeOption[]).map(option => (
+                        <SelectItem
+                          key={option.value}
+                          value={option.value}
+                          className="!h-auto !items-start !py-2"
+                        >
+                          <div className="flex flex-col gap-0.5">
+                            <div className="flex items-center gap-1">
+                              <span className="text-text-secondary system-sm-semibold">{option.label}</span>
+                              {option.recommended && (
+                                <Badge className="!h-4 !px-1">
+                                  {t('newApp.recommended', { ns: 'app' })}
+                                </Badge>
+                              )}
+                            </div>
+                            <span className="text-text-tertiary system-xs-regular">{option.description}</span>
+                          </div>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+
             </div>
             {isAppsFull && <AppsFull className="mt-4" loc="app-create" />}
             <div className="flex items-center justify-between pb-10 pt-5">
-              <div className="system-xs-regular flex cursor-pointer items-center gap-1 text-text-tertiary" onClick={onCreateFromTemplate}>
-                <span>{t('newApp.noIdeaTip', { ns: 'app' })}</span>
-                <div className="p-[1px]">
-                  <RiArrowRightLine className="h-3.5 w-3.5" />
+              <div className="flex items-center gap-2 system-xs-regular">
+                <div className="flex cursor-pointer items-center gap-1 text-text-tertiary" onClick={onCreateFromTemplate}>
+                  <span>{t('newApp.noIdeaTip', { ns: 'app' })}</span>
+                  <div className="p-[1px]">
+                    <RiArrowRightLine className="h-3.5 w-3.5" />
+                  </div>
                 </div>
+                <a
+                  href={marketplaceTemplatesUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="text-text-tertiary hover:text-text-secondary hover:underline"
+                >
+                  {t('newApp.orExploreCommunity', { ns: 'app' })}
+                </a>
               </div>
               <div className="flex gap-2">
                 <Button onClick={onClose}>{t('newApp.Cancel', { ns: 'app' })}</Button>
                 <Button disabled={isAppsFull || !name} className="gap-1" variant="primary" onClick={handleCreateApp}>
                   <span>{t('newApp.Create', { ns: 'app' })}</span>
-                  <div className="flex gap-0.5">
-                    <RiCommandLine size={14} className="system-kbd rounded-sm bg-components-kbd-bg-white p-0.5" />
-                    <RiCornerDownLeftLine size={14} className="system-kbd rounded-sm bg-components-kbd-bg-white p-0.5" />
-                  </div>
+                  <ShortcutsName keys={['ctrl', '↵']} bgColor="white" />
                 </Button>
               </div>
             </div>
@@ -336,8 +424,8 @@ function AppTypeCard({ icon, title, description, active, onClick }: AppTypeCardP
       onClick={onClick}
     >
       {icon}
-      <div className="system-sm-semibold mb-0.5 mt-2 text-text-secondary">{title}</div>
-      <div className="system-xs-regular line-clamp-2 text-text-tertiary" title={description}>{description}</div>
+      <div className="mb-0.5 mt-2 text-text-secondary system-sm-semibold">{title}</div>
+      <div className="line-clamp-2 text-text-tertiary system-xs-regular" title={description}>{description}</div>
     </div>
   )
 }
@@ -369,8 +457,8 @@ function AppPreview({ mode }: { mode: AppModeEnum }) {
   const previewInfo = modeToPreviewInfoMap[mode]
   return (
     <div className="px-8 py-4">
-      <h4 className="system-sm-semibold-uppercase text-text-secondary">{previewInfo.title}</h4>
-      <div className="system-xs-regular mt-1 min-h-8 max-w-96 text-text-tertiary">
+      <h4 className="text-text-secondary system-sm-semibold-uppercase">{previewInfo.title}</h4>
+      <div className="mt-1 min-h-8 max-w-96 text-text-tertiary system-xs-regular">
         <span>{previewInfo.description}</span>
       </div>
     </div>
@@ -391,7 +479,7 @@ function AppScreenShot({ mode, show }: { mode: AppModeEnum, show: boolean }) {
       <source media="(resolution: 1x)" srcSet={`${basePath}/screenshots/${theme}/${modeToImageMap[mode]}.png`} />
       <source media="(resolution: 2x)" srcSet={`${basePath}/screenshots/${theme}/${modeToImageMap[mode]}@2x.png`} />
       <source media="(resolution: 3x)" srcSet={`${basePath}/screenshots/${theme}/${modeToImageMap[mode]}@3x.png`} />
-      <Image
+      <img
         className={show ? '' : 'hidden'}
         src={`${basePath}/screenshots/${theme}/${modeToImageMap[mode]}.png`}
         alt="App Screen Shot"

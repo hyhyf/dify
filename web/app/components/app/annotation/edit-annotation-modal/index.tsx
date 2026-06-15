@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next'
 import Confirm from '@/app/components/base/confirm'
 import Drawer from '@/app/components/base/drawer-plus'
 import { MessageCheckRemove } from '@/app/components/base/icons/src/vender/line/communication'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import AnnotationFull from '@/app/components/billing/annotation-full'
 import { useProviderContext } from '@/context/provider-context'
 import useTimestamp from '@/hooks/use-timestamp'
@@ -72,18 +72,12 @@ const EditAnnotationModal: FC<Props> = ({
         onAdded(res.id, res.account?.name ?? '', postQuery, postAnswer)
       }
 
-      Toast.notify({
-        message: t('api.actionSuccess', { ns: 'common' }) as string,
-        type: 'success',
-      })
+      toast.success(t('api.actionSuccess', { ns: 'common' }) as string)
     }
     catch (error) {
       const fallbackMessage = t('api.actionFailed', { ns: 'common' }) as string
       const message = error instanceof Error && error.message ? error.message : fallbackMessage
-      Toast.notify({
-        message,
-        type: 'error',
-      })
+      toast.error(message)
       // Re-throw to preserve edit mode behavior for UI components
       throw error
     }
@@ -136,7 +130,7 @@ const EditAnnotationModal: FC<Props> = ({
             {
               annotationId
                 ? (
-                    <div className="system-sm-medium flex h-16 items-center justify-between rounded-bl-xl rounded-br-xl border-t border-divider-subtle bg-background-section-burn px-4 text-text-tertiary">
+                    <div className="flex h-16 items-center justify-between rounded-bl-xl rounded-br-xl border-t border-divider-subtle bg-background-section-burn px-4 text-text-tertiary system-sm-medium">
                       <div
                         className="flex cursor-pointer items-center space-x-2 pl-3"
                         onClick={() => setShowModal(true)}

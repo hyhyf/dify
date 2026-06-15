@@ -1,4 +1,5 @@
 import { fireEvent, render, screen } from '@testing-library/react'
+import { MARKETPLACE_URL_PREFIX } from '@/config'
 import { AppModeEnum } from '@/types/app'
 import Apps from './index'
 
@@ -39,8 +40,8 @@ vi.mock('../app-card', () => ({
 vi.mock('@/app/components/explore/create-app-modal', () => ({
   default: () => <div data-testid="create-from-template-modal" />,
 }))
-vi.mock('@/app/components/base/toast', () => ({
-  default: { notify: vi.fn() },
+vi.mock('@/app/components/base/ui/toast', () => ({
+  toast: { add: vi.fn() },
 }))
 vi.mock('@/app/components/base/amplitude', () => ({
   trackEvent: vi.fn(),
@@ -62,7 +63,7 @@ vi.mock('@/app/components/workflow/plugin-dependency/hooks', () => ({
 vi.mock('@/utils/app-redirection', () => ({
   getRedirection: vi.fn(),
 }))
-vi.mock('next/navigation', () => ({
+vi.mock('@/next/navigation', () => ({
   useRouter: () => ({ push: vi.fn() }),
 }))
 
@@ -123,5 +124,14 @@ describe('Apps', () => {
 
     expect(screen.getByText('app.newApp.noTemplateFound')).toBeInTheDocument()
     expect(screen.getByText('app.newApp.noTemplateFoundTip')).toBeInTheDocument()
+  })
+
+  it('renders explore community link', () => {
+    render(<Apps />)
+
+    const link = screen.getByRole('link', { name: 'app.newApp.exploreCommunity' })
+    expect(link).toHaveAttribute('href', `${MARKETPLACE_URL_PREFIX.replace(/\/$/, '')}/templates`)
+    expect(link).toHaveAttribute('target', '_blank')
+    expect(link).toHaveAttribute('rel', 'noopener noreferrer')
   })
 })

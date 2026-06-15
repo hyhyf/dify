@@ -1,16 +1,17 @@
 import { useClickAway } from 'ahooks'
 import {
   memo,
-  useEffect,
   useRef,
 } from 'react'
 import { useTranslation } from 'react-i18next'
+import { useFeatures } from '@/app/components/base/features/hooks'
 import { cn } from '@/utils/classnames'
 import Divider from '../base/divider'
 import {
   useDSL,
   useNodesInteractions,
   usePanelInteractions,
+  useWorkflowMoveMode,
   useWorkflowStartRun,
 } from './hooks'
 import AddBlock from './operator/add-block'
@@ -24,16 +25,18 @@ const PanelContextmenu = () => {
   const panelMenu = useStore(s => s.panelMenu)
   const clipboardElements = useStore(s => s.clipboardElements)
   const setShowImportDSLModal = useStore(s => s.setShowImportDSLModal)
+  const setShowUpgradeRuntimeModal = useStore(s => s.setShowUpgradeRuntimeModal)
+  const pendingComment = useStore(s => s.pendingComment)
+  const setCommentPlacing = useStore(s => s.setCommentPlacing)
+  const setCommentQuickAdd = useStore(s => s.setCommentQuickAdd)
+  const sandboxEnabled = !!useFeatures(s => s.features.sandbox?.enabled)
   const { handleNodesPaste } = useNodesInteractions()
-  const { handlePaneContextmenuCancel, handleNodeContextmenuCancel } = usePanelInteractions()
+  const { handlePaneContextmenuCancel } = usePanelInteractions()
   const { handleStartWorkflowRun } = useWorkflowStartRun()
   const { handleAddNote } = useOperator()
+  const { isCommentModeAvailable } = useWorkflowMoveMode()
   const { exportCheck } = useDSL()
-
-  useEffect(() => {
-    if (panelMenu)
-      handleNodeContextmenuCancel()
-  }, [panelMenu, handleNodeContextmenuCancel])
+  const pipelineId = useStore(s => s.pipelineId)
 
   useClickAway(() => {
     handlePaneContextmenuCancel()
@@ -79,6 +82,24 @@ const PanelContextmenu = () => {
         >
           {t('nodes.note.addNote', { ns: 'workflow' })}
         </div>
+        {isCommentModeAvailable && (
+          <div
+            className={cn(
+              'flex h-8 items-center justify-between rounded-lg px-3 text-sm text-text-secondary',
+              pendingComment ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-state-base-hover',
+            )}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (pendingComment)
+                return
+              setCommentQuickAdd(true)
+              setCommentPlacing(true)
+              handlePaneContextmenuCancel()
+            }}
+          >
+            {t('comments.actions.addComment', { ns: 'workflow' })}
+          </div>
+        )}
         <div
           className="flex h-8 cursor-pointer items-center justify-between rounded-lg px-3 text-sm text-text-secondary hover:bg-state-base-hover"
           onClick={() => {
@@ -120,9 +141,25 @@ const PanelContextmenu = () => {
           className="flex h-8 cursor-pointer items-center justify-between rounded-lg px-3 text-sm text-text-secondary hover:bg-state-base-hover"
           onClick={() => setShowImportDSLModal(true)}
         >
-          {t('common.importDSL', { ns: 'workflow' })}
+          {!pipelineId ? t('importApp', { ns: 'app' }) : t('common.importDSL', { ns: 'workflow' })}
         </div>
       </div>
+      {!sandboxEnabled && (
+        <>
+          <Divider className="m-0" />
+          <div className="p-1">
+            <div
+              className="flex h-8 cursor-pointer items-center justify-between rounded-lg px-3 text-sm text-text-accent hover:bg-state-base-hover"
+              onClick={() => {
+                setShowUpgradeRuntimeModal(true)
+                handlePaneContextmenuCancel()
+              }}
+            >
+              {t('sandboxMigrationModal.upgrade', { ns: 'workflow' })}
+            </div>
+          </div>
+        </>
+      )}
     </div>
   )
 }

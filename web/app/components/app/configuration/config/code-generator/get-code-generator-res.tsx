@@ -3,8 +3,10 @@ import type { FormValue } from '@/app/components/header/account-setting/model-pr
 import type { CodeLanguage } from '@/app/components/workflow/nodes/code/types'
 import type { GenRes } from '@/service/debug'
 import type { AppModeEnum, CompletionParams, Model, ModelModeType } from '@/types/app'
-import { useSessionStorageState } from 'ahooks'
-import useBoolean from 'ahooks/lib/useBoolean'
+import {
+  useBoolean,
+  useSessionStorageState,
+} from 'ahooks'
 import * as React from 'react'
 import { useCallback, useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
@@ -13,12 +15,14 @@ import Confirm from '@/app/components/base/confirm'
 import { Generator } from '@/app/components/base/icons/src/vender/other'
 import Loading from '@/app/components/base/loading'
 import Modal from '@/app/components/base/modal'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { ModelTypeEnum } from '@/app/components/header/account-setting/model-provider-page/declarations'
 import { useModelListAndDefaultModelAndCurrentProviderAndModel } from '@/app/components/header/account-setting/model-provider-page/hooks'
 import ModelParameterModal from '@/app/components/header/account-setting/model-provider-page/model-parameter-modal'
+import { STORAGE_KEYS } from '@/config/storage-keys'
 import { generateRule } from '@/service/debug'
 import { useGenerateRuleTemplate } from '@/service/use-apps'
+import { storage } from '@/utils/storage'
 import { languageMap } from '../../../../workflow/nodes/_base/components/editor/code-editor/index'
 import IdeaOutput from '../automatic/idea-output'
 import InstructionEditor from '../automatic/instruction-editor-in-workflow'
@@ -53,28 +57,19 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
   },
 ) => {
   const { t } = useTranslation()
-  const defaultCompletionParams = {
-    temperature: 0.7,
-    max_tokens: 0,
-    top_p: 0,
-    echo: false,
-    stop: [],
-    presence_penalty: 0,
-    frequency_penalty: 0,
-  }
-  const localModel = localStorage.getItem('auto-gen-model')
-    ? JSON.parse(localStorage.getItem('auto-gen-model') as string) as Model
-    : null
+  const localModel = storage.get<Model>(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL)
   const [model, setModel] = React.useState<Model>(localModel || {
     name: '',
     provider: '',
     mode: mode as unknown as ModelModeType.chat,
-    completion_params: defaultCompletionParams,
+    completion_params: {} as CompletionParams,
   })
   const {
     defaultModel,
   } = useModelListAndDefaultModelAndCurrentProviderAndModel(ModelTypeEnum.textGeneration)
-  const [instructionFromSessionStorage, setInstruction] = useSessionStorageState<string>(`improve-instruction-${flowId}-${nodeId}`)
+  const [instructionFromSessionStorage, setInstruction] = useSessionStorageState<string>(
+    `${STORAGE_KEYS.SESSION.GENERATOR.INSTRUCTION_PREFIX}${flowId}-${nodeId}`,
+  )
   const instruction = instructionFromSessionStorage || ''
 
   const [ideaOutput, setIdeaOutput] = useState<string>('')
@@ -95,13 +90,10 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
 
   const isValid = () => {
     if (instruction.trim() === '') {
-      Toast.notify({
-        type: 'error',
-        message: t('errorMsg.fieldRequired', {
-          ns: 'common',
-          field: t('code.instruction', { ns: 'appDebug' }),
-        }),
-      })
+      toast.error(t('errorMsg.fieldRequired', {
+        ns: 'common',
+        field: t('code.instruction', { ns: 'appDebug' }),
+      }))
       return false
     }
     return true
@@ -115,7 +107,7 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
       mode: newValue.mode as ModelModeType,
     }
     setModel(newModel)
-    localStorage.setItem('auto-gen-model', JSON.stringify(newModel))
+    storage.set(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL, newModel)
   }, [model, setModel])
 
   const handleCompletionParamsChange = useCallback((newParams: FormValue) => {
@@ -124,7 +116,7 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
       completion_params: newParams as CompletionParams,
     }
     setModel(newModel)
-    localStorage.setItem('auto-gen-model', JSON.stringify(newModel))
+    storage.set(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL, newModel)
   }, [model, setModel])
 
   const onGenerate = async () => {
@@ -134,12 +126,19 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
       return
     setLoadingTrue()
     try {
+      const completionParams = model.completion_params
+      const modelConfig = Object.keys(completionParams).length > 0
+        ? model
+        : (() => {
+            const { completion_params: _completion_params, ...rest } = model
+            return rest
+          })()
       const { error, ...res } = await generateRule({
         flow_id: flowId,
         node_id: nodeId,
         current: currentCode,
         instruction,
-        model_config: model,
+        model_config: modelConfig,
         ideal_output: ideaOutput,
         language: languageMap[codeLanguages] || 'javascript',
       })
@@ -147,10 +146,7 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
         res.modified = (res as any).code
 
       if (error) {
-        Toast.notify({
-          type: 'error',
-          message: error,
-        })
+        toast.error(error)
       }
       else {
         addVersion(res)
@@ -168,16 +164,11 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
 
   useEffect(() => {
     if (defaultModel) {
-      const localModel = localStorage.getItem('auto-gen-model')
-        ? JSON.parse(localStorage.getItem('auto-gen-model') || '')
-        : null
+      const localModel = storage.get<Model>(STORAGE_KEYS.LOCAL.GENERATOR.AUTO_GEN_MODEL)
       if (localModel) {
         setModel({
           ...localModel,
-          completion_params: {
-            ...defaultCompletionParams,
-            ...localModel.completion_params,
-          },
+          completion_params: (localModel.completion_params ?? {}) as CompletionParams,
         })
       }
       else {
@@ -212,7 +203,6 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
           <div className="mb-4">
             <ModelParameterModal
               popupClassName="!w-[520px]"
-              portalToFollowElemContentClassName="z-[1000]"
               isAdvancedMode={true}
               provider={model.provider}
               completionParams={model.completion_params}
@@ -224,7 +214,7 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
           </div>
           <div>
             <div className="text-[0px]">
-              <div className="system-sm-semibold-uppercase mb-1.5 text-text-secondary">{t('codegen.instruction', { ns: 'appDebug' })}</div>
+              <div className="mb-1.5 text-text-secondary system-sm-semibold-uppercase">{t('codegen.instruction', { ns: 'appDebug' })}</div>
               <InstructionEditor
                 editorKey={editorKey}
                 value={instruction}
@@ -248,7 +238,7 @@ export const GetCodeGeneratorResModal: FC<IGetCodeGeneratorResProps> = (
                 disabled={isLoading}
               >
                 <Generator className="h-4 w-4" />
-                <span className="text-xs font-semibold ">{t('codegen.generate', { ns: 'appDebug' })}</span>
+                <span className="text-xs font-semibold">{t('codegen.generate', { ns: 'appDebug' })}</span>
               </Button>
             </div>
           </div>

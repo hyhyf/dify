@@ -14,7 +14,6 @@ const ErrorMessage = ({
   errorMsg,
 }: ErrorMessageProps) => {
   return (
-    // eslint-disable-next-line tailwindcss/migration-from-tailwind-2
     <div className={cn(
       'flex gap-x-0.5 rounded-xl border-[0.5px] border-components-panel-border bg-opacity-40 bg-toast-error-bg p-2 shadow-xs shadow-shadow-shadow-3',
       className,
@@ -24,9 +23,9 @@ const ErrorMessage = ({
         <RiErrorWarningFill className="h-4 w-4 text-text-destructive" />
       </div>
       <div className="flex flex-col gap-y-0.5 py-1">
-        <div className="system-xs-medium text-text-primary">{title}</div>
+        <div className="text-text-primary system-xs-medium">{title}</div>
         {errorMsg && (
-          <div className="system-xs-regular text-text-secondary">{errorMsg}</div>
+          <div className="text-text-secondary system-xs-regular">{errorMsg}</div>
         )}
       </div>
     </div>

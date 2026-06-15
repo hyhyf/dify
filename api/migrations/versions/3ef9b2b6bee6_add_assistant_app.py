@@ -92,7 +92,6 @@ def upgrade():
         sa.Column('author', sa.String(length=40), nullable=False),
         sa.Column('created_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP(0)'), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.text('CURRENT_TIMESTAMP(0)'), nullable=False),
-        sa.ForeignKeyConstraint(['app_id'], ['apps.id'], ),
         sa.PrimaryKeyConstraint('id', name='published_app_tool_pkey'),
         sa.UniqueConstraint('app_id', 'user_id', name='unique_published_app_tool')
         )
@@ -110,7 +109,6 @@ def upgrade():
         sa.Column('author', sa.String(length=40), nullable=False),
         sa.Column('created_at', sa.DateTime(), server_default=sa.func.current_timestamp(), nullable=False),
         sa.Column('updated_at', sa.DateTime(), server_default=sa.func.current_timestamp(), nullable=False),
-        sa.ForeignKeyConstraint(['app_id'], ['apps.id'], ),
         sa.PrimaryKeyConstraint('id', name='published_app_tool_pkey'),
         sa.UniqueConstraint('app_id', 'user_id', name='unique_published_app_tool')
         )

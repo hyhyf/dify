@@ -2,10 +2,52 @@ import type { RefObject } from 'react'
 import type { Viewport } from 'reactflow'
 import type { BeforeRunFormProps } from '@/app/components/workflow/nodes/_base/components/before-run-form'
 import type { ErrorHandleTypeEnum } from '@/app/components/workflow/nodes/_base/components/error-handle/types'
+import type { FormInputItem, UserAction } from '@/app/components/workflow/nodes/human-input/types'
 import type { SpecialResultPanelProps } from '@/app/components/workflow/run/special-result-panel'
-import type { BlockEnum, CommonNodeType, ConversationVariable, Edge, EnvironmentVariable, InputVar, Node, ValueSelector, Variable, VarType } from '@/app/components/workflow/types'
+import type {
+  BlockEnum,
+  CommonNodeType,
+  ConversationVariable,
+  Edge,
+  EnvironmentVariable,
+  InputVar,
+  JsonValue,
+  Node,
+  ValueSelector,
+  Variable,
+  VarType,
+  WorkflowRunningStatus,
+} from '@/app/components/workflow/types'
 import type { RAGPipelineVariables } from '@/models/pipeline'
 import type { TransferMethod } from '@/types/app'
+
+export type WorkflowDraftFileUploadImage = {
+  enabled?: boolean
+  number_limits?: number
+  transfer_methods?: TransferMethod[]
+}
+
+export type WorkflowDraftFileUpload = {
+  enabled?: boolean
+  image?: WorkflowDraftFileUploadImage
+  allowed_file_types?: string[]
+  allowed_file_extensions?: string[]
+  allowed_file_upload_methods?: TransferMethod[]
+  number_limits?: number
+}
+
+export type WorkflowDraftFeatures = {
+  sandbox?: { enabled?: boolean }
+  file_upload?: WorkflowDraftFileUpload
+  opening_statement?: string
+  suggested_questions?: string[]
+  suggested_questions_after_answer?: boolean | { enabled?: boolean }
+  speech_to_text?: Record<string, unknown>
+  text_to_speech?: Record<string, unknown>
+  retriever_resource?: Record<string, unknown>
+  sensitive_word_avoidance?: Record<string, unknown>
+  annotation_reply?: Record<string, unknown>
+}
 
 export type AgentLogItem = {
   node_execution_id: string
@@ -28,6 +70,98 @@ export type AgentLogItemWithChildren = AgentLogItem & {
   children: AgentLogItemWithChildren[]
 }
 
+export type IconObject = {
+  background: string
+  content: string
+}
+
+export type LLMGenerationItem = {
+  id: string
+  type: 'model' | 'tool' | 'thought' | 'text'
+  thoughtCompleted?: boolean
+  thoughtOutput?: string
+
+  toolName?: string
+  toolProvider?: string
+  toolIcon?: string | IconObject
+  toolIconDark?: string | IconObject
+  toolArguments?: string
+  toolOutput?: Record<string, JsonValue> | string
+  toolFiles?: string[]
+  toolError?: string
+  toolDuration?: number
+
+  modelName?: string
+  modelProvider?: string
+  modelOutput?: Record<string, JsonValue> | string
+  modelDuration?: number
+  modelIcon?: string | IconObject
+  modelIconDark?: string | IconObject
+
+  text?: string
+  textCompleted?: boolean
+  isError?: boolean
+}
+
+export type ToolCallDetail = {
+  id: string
+  name: string
+  arguments: string
+  output: string
+  files: string[]
+  error: string
+  elapsed_time?: number
+  status: string
+}
+export type SequenceSegment
+  = | { type: 'context', start: number, end: number }
+    | { type: 'reasoning', index: number }
+    | { type: 'tool_call', index: number }
+
+export type LLMLogItem = {
+  reasoning_content: string[]
+  tool_calls: ToolCallDetail[]
+  sequence: SequenceSegment[]
+}
+
+export type WorkflowGenerationToolCall = {
+  id: string
+  name: string
+  arguments: string
+  output?: string
+  result?: string
+  files?: string[]
+  status?: string
+  elapsed_time?: number
+  icon?: string | IconObject
+  icon_dark?: string | IconObject
+}
+
+export type WorkflowGenerationSequenceSegment
+  = | { type: 'content', start: number, end: number }
+    | { type: 'reasoning', index: number }
+    | { type: 'tool_call', index: number }
+
+export type WorkflowGenerationValue = {
+  content: string
+  reasoning_content: string[]
+  tool_calls: WorkflowGenerationToolCall[]
+  sequence: WorkflowGenerationSequenceSegment[]
+}
+
+export type LLMTraceItem = {
+  type: 'model' | 'tool'
+  duration: number
+  output: Record<string, JsonValue>
+  provider?: string
+  name: string
+  icon?: string | IconObject
+  icon_dark?: string | IconObject
+  error?: string
+  status?: 'success' | 'error'
+  usage?: Record<string, number | string> | null
+}
+
 export type NodeTracing = {
   id: string
   index: number
@@ -37,11 +171,11 @@ export type NodeTracing = {
   loop_id?: string
   node_type: BlockEnum
   title: string
-  inputs: any
+  inputs: JsonValue
   inputs_truncated: boolean
-  process_data: any
+  process_data: JsonValue
   process_data_truncated: boolean
-  outputs?: Record<string, any>
+  outputs?: Record<string, JsonValue> | string
   outputs_truncated: boolean
   outputs_full_content?: {
     download_url: string
@@ -71,7 +205,8 @@ export type NodeTracing = {
       agent_strategy?: string
       icon?: string
     }
-    loop_variable_map?: Record<string, any>
+    loop_variable_map?: Record<string, JsonValue>
+    llm_trace?: LLMTraceItem[]
   }
   metadata: {
     iterator_length: number
@@ -88,7 +223,7 @@ export type NodeTracing = {
   iterDurationMap?: IterationDurationMap
   loopDurationMap?: LoopDurationMap
   finished_at: number
-  extras?: any
+  extras?: JsonValue
   expand?: boolean // for UI
   details?: NodeTracing[][] // iteration or loop detail
   retryDetail?: NodeTracing[] // retry detail
@@ -104,6 +239,7 @@ export type NodeTracing = {
   parent_parallel_id?: string
   parent_parallel_start_node_id?: string
   agentLog?: AgentLogItemWithChildren[] // agent log
+  generation_detail?: LLMLogItem
 }
 
 export type FetchWorkflowDraftResponse = {
@@ -113,7 +249,7 @@ export type FetchWorkflowDraftResponse = {
     edges: Edge[]
     viewport?: Viewport
   }
-  features?: any
+  features?: WorkflowDraftFeatures
   created_at: number
   created_by: {
     id: string
@@ -134,6 +270,27 @@ export type FetchWorkflowDraftResponse = {
   version: string
   marked_name: string
   marked_comment: string
+}
+
+export type NestedNodeParameterSchema = {
+  name: string
+  type: string
+  description?: string
+}
+
+export type NestedNodeGraphPayload = {
+  parent_node_id: string
+  parameter_key: string
+  context_source: ValueSelector
+  parameter_schema: NestedNodeParameterSchema
+}
+
+export type NestedNodeGraphResponse = {
+  graph: {
+    nodes: Node[]
+    edges: Edge[]
+    viewport?: Viewport
+  }
 }
 
 export type VersionHistory = FetchWorkflowDraftResponse
@@ -165,6 +322,20 @@ export type WorkflowStartedResponse = {
     workflow_id: string
     created_at: number
   }
+  conversation_id?: string // only in chatflow
+  message_id?: string // only in chatflow
+}
+
+export type WorkflowPausedResponse = {
+  task_id: string
+  workflow_run_id: string
+  event: string
+  data: {
+    outputs: Record<string, JsonValue> | null
+    paused_nodes: string[]
+    reasons: JsonValue[]
+    workflow_run_id: string
+  }
 }
 
 export type WorkflowFinishedResponse = {
@@ -175,7 +346,7 @@ export type WorkflowFinishedResponse = {
     id: string
     workflow_id: string
     status: string
-    outputs: any
+    outputs: Record<string, JsonValue> | string | null
     error: string
     elapsed_time: number
     total_tokens: number
@@ -280,6 +451,16 @@ export type TextChunkResponse = {
   event: string
   data: {
     text: string
+    chunk_type?: 'text' | 'tool_call' | 'tool_result' | 'thought' | 'thought_start' | 'thought_end'
+    tool_call_id?: string
+    tool_name?: string
+    tool_arguments?: string
+    tool_icon?: string | IconObject
+    tool_icon_dark?: string | IconObject
+
+    tool_files?: string[]
+    tool_error?: string
+    tool_elapsed_time?: number
   }
 }
 
@@ -298,6 +479,54 @@ export type AgentLogResponse = {
   data: AgentLogItemWithChildren
 }
 
+export type HumanInputFormData = {
+  form_id: string
+  node_id: string
+  node_title: string
+  form_content: string
+  inputs: FormInputItem[]
+  actions: UserAction[]
+  form_token: string
+  resolved_default_values: Record<string, string>
+  display_in_ui: boolean
+  expiration_time: number
+}
+
+export type HumanInputRequiredResponse = {
+  task_id: string
+  workflow_run_id: string
+  event: string
+  data: HumanInputFormData
+}
+
+export type HumanInputFilledFormData = {
+  node_id: string
+  node_title: string
+  rendered_content: string
+  action_id: string
+  action_text: string
+}
+
+export type HumanInputFormFilledResponse = {
+  task_id: string
+  workflow_run_id: string
+  event: string
+  data: HumanInputFilledFormData
+}
+
+export type HumanInputFormTimeoutData = {
+  node_id: string
+  node_title: string
+  expiration_time: number
+}
+
+export type HumanInputFormTimeoutResponse = {
+  task_id: string
+  workflow_run_id: string
+  event: string
+  data: HumanInputFormTimeoutData
+}
+
 export type WorkflowRunHistory = {
   id: string
   version: string
@@ -309,8 +538,8 @@ export type WorkflowRunHistory = {
     viewport?: Viewport
   }
   inputs: Record<string, string>
-  status: string
-  outputs: Record<string, any>
+  status: WorkflowRunningStatus
+  outputs: Record<string, JsonValue>
   error?: string
   elapsed_time: number
   total_tokens: number
@@ -333,7 +562,7 @@ export type ChatRunHistoryResponse = {
 
 export type NodesDefaultConfigsResponse = {
   type: string
-  config: any
+  config: unknown
 }[]
 
 export type ConversationVariableResponse = {
@@ -346,7 +575,7 @@ export type ConversationVariableResponse = {
 
 export type IterationDurationMap = Record<string, number>
 export type LoopDurationMap = Record<string, number>
-export type LoopVariableMap = Record<string, any>
+export type LoopVariableMap = Record<string, JsonValue>
 
 export type WorkflowConfigResponse = {
   parallel_depth_limit: number
@@ -371,25 +600,34 @@ export type PanelExposedType = {
 export type PanelProps = {
   getInputVars: (textList: string[]) => InputVar[]
   toVarInputs: (variables: Variable[]) => InputVar[]
-  runInputData: Record<string, any>
-  runInputDataRef: RefObject<Record<string, any>>
-  setRunInputData: (data: Record<string, any>) => void
-  runResult: any
+  runInputData: Record<string, JsonValue>
+  runInputDataRef: RefObject<Record<string, JsonValue>>
+  setRunInputData: (data: Record<string, JsonValue>) => void
+  runResult: NodeTracing | null
 }
 
 export type NodeRunResult = NodeTracing
 
 // Var Inspect
-export enum VarInInspectType {
-  conversation = 'conversation',
-  environment = 'env',
-  node = 'node',
-  system = 'sys',
-}
+/* eslint-disable ts/no-redeclare -- const + type share names (erasable enum replacement) */
+export const VarInInspectType = {
+  conversation: 'conversation',
+  environment: 'env',
+  node: 'node',
+  system: 'sys',
+} as const
+export type VarInInspectType = typeof VarInInspectType[keyof typeof VarInInspectType]
+/* eslint-enable ts/no-redeclare */
 
 export type FullContent = {
   size_bytes: number
   download_url: string
+}
+
+export type VarInInspectAliasMeta = {
+  extractorNodeId: string
+  outputSelector: string[]
+  sourceVarId: string
 }
 
 export type VarInInspect = {
@@ -399,12 +637,13 @@ export type VarInInspect = {
   description: string
   selector: ValueSelector // can get node id from selector[0]
   value_type: VarType
-  value: any
+  value?: JsonValue
   edited: boolean
   visible: boolean
   is_truncated: boolean
   full_content: FullContent
   schemaType?: string
+  aliasMeta?: VarInInspectAliasMeta
 }
 
 export type NodeWithVar = {
@@ -415,4 +654,5 @@ export type NodeWithVar = {
   vars: VarInInspect[]
   isSingRunRunning?: boolean
   isValueFetched?: boolean
+  isHidden?: boolean
 }

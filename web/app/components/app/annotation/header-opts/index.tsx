@@ -21,6 +21,7 @@ import { LanguagesSupported } from '@/i18n-config/language'
 import { clearAllAnnotations, fetchExportAnnotationList } from '@/service/annotation'
 
 import { cn } from '@/utils/classnames'
+import { downloadBlob } from '@/utils/download'
 import Button from '../../../base/button'
 import AddAnnotationModal from '../add-annotation-modal'
 import BatchAddModal from '../batch-add-annotation-modal'
@@ -56,28 +57,23 @@ const HeaderOptions: FC<Props> = ({
   )
 
   const JSONLOutput = () => {
-    const a = document.createElement('a')
     const content = listTransformer(list).join('\n')
     const file = new Blob([content], { type: 'application/jsonl' })
-    const url = URL.createObjectURL(file)
-    a.href = url
-    a.download = `annotations-${locale}.jsonl`
-    a.click()
-    URL.revokeObjectURL(url)
+    downloadBlob({ data: file, fileName: `annotations-${locale}.jsonl` })
   }
 
-  const fetchList = async () => {
+  const fetchList = React.useCallback(async () => {
     const { data }: any = await fetchExportAnnotationList(appId)
     setList(data as AnnotationItemBasic[])
-  }
+  }, [appId])
 
   useEffect(() => {
     fetchList()
-  }, [])
+  }, [fetchList])
   useEffect(() => {
     if (controlUpdateList)
       fetchList()
-  }, [controlUpdateList])
+  }, [controlUpdateList, fetchList])
 
   const [showBulkImportModal, setShowBulkImportModal] = useState(false)
   const [showClearConfirm, setShowClearConfirm] = useState(false)
@@ -107,12 +103,12 @@ const HeaderOptions: FC<Props> = ({
           }}
         >
           <FilePlus02 className="h-4 w-4 text-text-tertiary" />
-          <span className="system-sm-regular grow text-left text-text-secondary">{t('table.header.bulkImport', { ns: 'appAnnotation' })}</span>
+          <span className="grow text-left text-text-secondary system-sm-regular">{t('table.header.bulkImport', { ns: 'appAnnotation' })}</span>
         </button>
         <Menu as="div" className="relative h-full w-full">
           <MenuButton className="mx-1 flex h-9 w-[calc(100%_-_8px)] cursor-pointer items-center space-x-2 rounded-lg px-3 py-2 hover:bg-components-panel-on-panel-item-bg-hover disabled:opacity-50">
             <FileDownload02 className="h-4 w-4 text-text-tertiary" />
-            <span className="system-sm-regular grow text-left text-text-secondary">{t('table.header.bulkExport', { ns: 'appAnnotation' })}</span>
+            <span className="grow text-left text-text-secondary system-sm-regular">{t('table.header.bulkExport', { ns: 'appAnnotation' })}</span>
             <ChevronRight className="h-[14px] w-[14px] shrink-0 text-text-tertiary" />
           </MenuButton>
           <Transition
@@ -139,11 +135,11 @@ const HeaderOptions: FC<Props> = ({
                 ]}
               >
                 <button type="button" disabled={annotationUnavailable} className="mx-1 flex h-9 w-[calc(100%_-_8px)] cursor-pointer items-center space-x-2 rounded-lg px-3 py-2 hover:bg-components-panel-on-panel-item-bg-hover disabled:opacity-50">
-                  <span className="system-sm-regular grow text-left text-text-secondary">CSV</span>
+                  <span className="grow text-left text-text-secondary system-sm-regular">CSV</span>
                 </button>
               </CSVDownloader>
               <button type="button" disabled={annotationUnavailable} className={cn('mx-1 flex h-9 w-[calc(100%_-_8px)] cursor-pointer items-center space-x-2 rounded-lg px-3 py-2 hover:bg-components-panel-on-panel-item-bg-hover disabled:opacity-50', '!border-0')} onClick={JSONLOutput}>
-                <span className="system-sm-regular grow text-left text-text-secondary">JSONL</span>
+                <span className="grow text-left text-text-secondary system-sm-regular">JSONL</span>
               </button>
             </MenuItems>
           </Transition>
@@ -154,7 +150,7 @@ const HeaderOptions: FC<Props> = ({
           className="mx-1 flex h-9 w-[calc(100%_-_8px)] cursor-pointer items-center space-x-2 rounded-lg px-3 py-2 text-red-600 hover:bg-red-50 disabled:opacity-50"
         >
           <RiDeleteBinLine className="h-4 w-4" />
-          <span className="system-sm-regular grow text-left">
+          <span className="grow text-left system-sm-regular">
             {t('table.header.clearAll', { ns: 'appAnnotation' })}
           </span>
         </button>

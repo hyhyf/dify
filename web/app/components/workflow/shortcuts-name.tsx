@@ -3,14 +3,16 @@ import { cn } from '@/utils/classnames'
 import { getKeyboardKeyNameBySystem } from './utils'
 
 type ShortcutsNameProps = {
-  keys: string[]
+  keys: readonly string[]
   className?: string
   textColor?: 'default' | 'secondary'
+  bgColor?: 'gray' | 'white'
 }
 const ShortcutsName = ({
   keys,
   className,
   textColor = 'default',
+  bgColor = 'gray',
 }: ShortcutsNameProps) => {
   return (
     <div className={cn(
@@ -23,7 +25,9 @@ const ShortcutsName = ({
           <div
             key={key}
             className={cn(
-              'system-kbd flex h-4 min-w-4 items-center justify-center rounded-[4px] bg-components-kbd-bg-gray capitalize',
+              'flex h-4 min-w-4 items-center justify-center rounded-[4px] px-1 capitalize system-kbd',
+              bgColor === 'gray' && 'bg-components-kbd-bg-gray',
+              bgColor === 'white' && 'bg-components-kbd-bg-white text-text-primary-on-surface',
               textColor === 'secondary' && 'text-text-tertiary',
             )}
           >

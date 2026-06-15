@@ -3,14 +3,27 @@ from typing import Any, cast
 from uuid import uuid4
 
 from configs import dify_config
-from core.file import File
-from core.variables.exc import VariableError
-from core.variables.segments import (
+from dify_graph.constants import (
+    CONVERSATION_VARIABLE_NODE_ID,
+    ENVIRONMENT_VARIABLE_NODE_ID,
+)
+from dify_graph.file import File
+from dify_graph.model_runtime.entities import PromptMessage
+from dify_graph.model_runtime.entities.message_entities import (
+    AssistantPromptMessage,
+    PromptMessageRole,
+    SystemPromptMessage,
+    ToolPromptMessage,
+    UserPromptMessage,
+)
+from dify_graph.variables.exc import VariableError
+from dify_graph.variables.segments import (
     ArrayAnySegment,
     ArrayBooleanSegment,
     ArrayFileSegment,
     ArrayNumberSegment,
     ArrayObjectSegment,
+    ArrayPromptMessageSegment,
     ArraySegment,
     ArrayStringSegment,
     BooleanSegment,
@@ -22,13 +35,14 @@ from core.variables.segments import (
     Segment,
     StringSegment,
 )
-from core.variables.types import SegmentType
-from core.variables.variables import (
+from dify_graph.variables.types import SegmentType
+from dify_graph.variables.variables import (
     ArrayAnyVariable,
     ArrayBooleanVariable,
     ArrayFileVariable,
     ArrayNumberVariable,
     ArrayObjectVariable,
+    ArrayPromptMessageVariable,
     ArrayStringVariable,
     BooleanVariable,
     FileVariable,
@@ -39,10 +53,6 @@ from core.variables.variables import (
     SecretVariable,
     StringVariable,
     VariableBase,
-)
-from core.workflow.constants import (
-    CONVERSATION_VARIABLE_NODE_ID,
-    ENVIRONMENT_VARIABLE_NODE_ID,
 )
 
 
@@ -55,12 +65,13 @@ class TypeMismatchError(Exception):
 
 
 # Define the constant
-SEGMENT_TO_VARIABLE_MAP = {
+SEGMENT_TO_VARIABLE_MAP: Mapping[type[Segment], type[VariableBase]] = {
     ArrayAnySegment: ArrayAnyVariable,
     ArrayBooleanSegment: ArrayBooleanVariable,
     ArrayFileSegment: ArrayFileVariable,
     ArrayNumberSegment: ArrayNumberVariable,
     ArrayObjectSegment: ArrayObjectVariable,
+    ArrayPromptMessageSegment: ArrayPromptMessageVariable,
     ArrayStringSegment: ArrayStringVariable,
     BooleanSegment: BooleanVariable,
     FileSegment: FileVariable,
@@ -156,7 +167,13 @@ def build_segment(value: Any, /) -> Segment:
         return ObjectSegment(value=value)
     if isinstance(value, File):
         return FileSegment(value=value)
+    if isinstance(value, PromptMessage):
+        # Single PromptMessage should be wrapped in a list
+        return ArrayPromptMessageSegment(value=[value])
     if isinstance(value, list):
+        # Check if all items are PromptMessage
+        if value and all(isinstance(item, PromptMessage) for item in value):
+            return ArrayPromptMessageSegment(value=value)
         items = [build_segment(item) for item in value]
         types = {item.value_type for item in items}
         if all(isinstance(item, ArraySegment) for item in items):
@@ -200,7 +217,32 @@ _segment_factory: Mapping[SegmentType, type[Segment]] = {
     SegmentType.ARRAY_OBJECT: ArrayObjectSegment,
     SegmentType.ARRAY_FILE: ArrayFileSegment,
     SegmentType.ARRAY_BOOLEAN: ArrayBooleanSegment,
+    SegmentType.ARRAY_PROMPT_MESSAGE: ArrayPromptMessageSegment,
 }
+
+
+def _deserialize_prompt_message_list(value: list[dict]) -> list[PromptMessage]:
+    """
+    Deserialize a list of dicts to list[PromptMessage].
+
+    This is used when loading ARRAY_PROMPT_MESSAGE from database,
+    where PromptMessage objects are serialized as dicts.
+    """
+    result: list[PromptMessage] = []
+    for msg_dict in value:
+        role = msg_dict.get("role")
+        if role in (PromptMessageRole.USER, "user"):
+            result.append(UserPromptMessage.model_validate(msg_dict))
+        elif role in (PromptMessageRole.ASSISTANT, "assistant"):
+            result.append(AssistantPromptMessage.model_validate(msg_dict))
+        elif role in (PromptMessageRole.SYSTEM, "system"):
+            result.append(SystemPromptMessage.model_validate(msg_dict))
+        elif role in (PromptMessageRole.TOOL, "tool"):
+            result.append(ToolPromptMessage.model_validate(msg_dict))
+        else:
+            # Fallback to UserPromptMessage for unknown roles
+            result.append(UserPromptMessage.model_validate(msg_dict))
+    return result
 
 
 def build_segment_with_type(segment_type: SegmentType, value: Any) -> Segment:
@@ -274,6 +316,12 @@ def build_segment_with_type(segment_type: SegmentType, value: Any) -> Segment:
     ):
         segment_class = _segment_factory[inferred_type]
         return segment_class(value_type=inferred_type, value=value)
+    elif segment_type == SegmentType.ARRAY_PROMPT_MESSAGE and inferred_type == SegmentType.ARRAY_OBJECT:
+        # PromptMessage serializes to dict, so ARRAY_OBJECT is compatible with ARRAY_PROMPT_MESSAGE
+        # Need to deserialize dict list back to PromptMessage objects
+        deserialized_messages = _deserialize_prompt_message_list(value)
+        segment_class = _segment_factory[segment_type]
+        return segment_class(value_type=segment_type, value=deserialized_messages)
     else:
         raise TypeMismatchError(f"Type mismatch: expected {segment_type}, but got {inferred_type}, value={value}")
 
@@ -296,13 +344,11 @@ def segment_to_variable(
         raise UnsupportedSegmentTypeError(f"not supported segment type {segment_type}")
 
     variable_class = SEGMENT_TO_VARIABLE_MAP[segment_type]
-    return cast(
-        VariableBase,
-        variable_class(
-            id=id,
-            name=name,
-            description=description,
-            value=segment.value,
-            selector=list(selector),
-        ),
+    return variable_class(
+        id=id,
+        name=name,
+        description=description,
+        value_type=segment.value_type,
+        value=segment.value,
+        selector=list(selector),
     )

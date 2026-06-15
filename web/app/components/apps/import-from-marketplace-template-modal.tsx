@@ -1,0 +1,164 @@
+'use client'
+
+import type { MarketplaceTemplate } from '@/service/marketplace-templates'
+import { skipToken, useQuery } from '@tanstack/react-query'
+import { useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import AppIcon from '@/app/components/base/app-icon'
+import Button from '@/app/components/base/button'
+import { Dialog, DialogCloseButton, DialogContent, DialogTitle } from '@/app/components/base/ui/dialog'
+import { toast } from '@/app/components/base/ui/toast'
+import { MARKETPLACE_API_PREFIX, MARKETPLACE_URL_PREFIX } from '@/config'
+import { marketplaceQuery } from '@/service/client'
+import { fetchMarketplaceTemplateDSL } from '@/service/marketplace-templates'
+
+type ImportFromMarketplaceTemplateModalProps = {
+  templateId: string
+  onConfirm: (yamlContent: string, template: MarketplaceTemplate) => void
+  onClose: () => void
+}
+
+const ImportFromMarketplaceTemplateModal = ({
+  templateId,
+  onConfirm,
+  onClose,
+}: ImportFromMarketplaceTemplateModalProps) => {
+  const { t } = useTranslation()
+
+  const { data, isLoading, isError } = useQuery(marketplaceQuery.templateDetail.queryOptions({
+    input: templateId
+      ? { params: { templateId } }
+      : skipToken,
+  }))
+  const template = data?.data ?? null
+
+  const [isImporting, setIsImporting] = useState(false)
+
+  const handleConfirm = useCallback(async () => {
+    if (!template || isImporting)
+      return
+    setIsImporting(true)
+    try {
+      const yamlContent = await fetchMarketplaceTemplateDSL(templateId)
+      onConfirm(yamlContent, template)
+    }
+    catch {
+      toast.error(t('marketplace.template.importFailed', { ns: 'app' }))
+      setIsImporting(false)
+    }
+  }, [template, templateId, isImporting, onConfirm, t])
+
+  const templateUrl = MARKETPLACE_URL_PREFIX
+    ? `${MARKETPLACE_URL_PREFIX}/templates/${encodeURIComponent(templateId)}`
+    : undefined
+
+  return (
+    <Dialog open onOpenChange={open => !open && onClose()}>
+      <DialogContent className="w-[520px] rounded-2xl border-[0.5px] border-components-panel-border bg-components-panel-bg p-0 shadow-xl">
+        <DialogCloseButton className="right-5 top-5 h-8 w-8" />
+        {/* Header */}
+        <div className="pb-3 pl-6 pr-14 pt-6">
+          <DialogTitle className="text-text-primary title-2xl-semi-bold">
+            {t('marketplace.template.modalTitle', { ns: 'app' })}
+          </DialogTitle>
+        </div>
+
+        {/* Content */}
+        <div className="px-6 pb-4">
+          {isLoading && (
+            <div className="flex h-[200px] items-center justify-center">
+              <span className="i-ri-loader-2-line h-6 w-6 animate-spin text-text-tertiary" aria-hidden="true" />
+            </div>
+          )}
+
+          {isError && !isLoading && (
+            <div className="flex h-[200px] flex-col items-center justify-center gap-2">
+              <div className="text-text-tertiary system-md-regular">
+                {t('marketplace.template.fetchFailed', { ns: 'app' })}
+              </div>
+              <Button variant="secondary" onClick={onClose}>
+                {t('newApp.Cancel', { ns: 'app' })}
+              </Button>
+            </div>
+          )}
+
+          {template && !isLoading && (
+            <div className="flex flex-col gap-4">
+              {/* Template info */}
+              <div className="flex items-start gap-3 rounded-xl bg-background-section-burn p-4">
+                <AppIcon
+                  size="large"
+                  iconType={template.icon_file_key ? 'image' : 'emoji'}
+                  icon={template.icon || '🤖'}
+                  background={template.icon_background || '#FFEAD5'}
+                  imageUrl={template.icon_file_key
+                    ? `${MARKETPLACE_API_PREFIX}/templates/${encodeURIComponent(templateId)}/icon`
+                    : undefined}
+                />
+                <div className="flex min-w-0 flex-1 flex-col gap-1">
+                  <div className="truncate text-text-primary system-md-semibold">
+                    {template.template_name}
+                  </div>
+                  <div className="text-text-tertiary system-xs-regular">
+                    {t('marketplace.template.publishedBy', { ns: 'app', publisher: template.publisher_unique_handle })}
+                  </div>
+                </div>
+              </div>
+
+              {/* Overview */}
+              {template.overview && (
+                <div>
+                  <div className="mb-1 text-text-secondary system-sm-semibold">
+                    {t('marketplace.template.overview', { ns: 'app' })}
+                  </div>
+                  <div className="line-clamp-4 text-text-tertiary system-sm-regular">
+                    {template.overview}
+                  </div>
+                </div>
+              )}
+
+              {/* Usage count */}
+              {template.usage_count !== null && template.usage_count > 0 && (
+                <div className="text-text-quaternary system-xs-regular">
+                  {t('marketplace.template.usageCount', { ns: 'app', count: template.usage_count })}
+                </div>
+              )}
+
+              {/* Marketplace link */}
+              {templateUrl && (
+                <a
+                  href={templateUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="inline-flex items-center gap-1 text-text-accent system-xs-regular"
+                >
+                  {t('marketplace.template.viewOnMarketplace', { ns: 'app' })}
+                  <span className="i-ri-external-link-line h-3 w-3" aria-hidden="true" />
+                </a>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Footer */}
+        {template && !isLoading && (
+          <div className="flex items-center justify-end gap-3 border-t border-divider-subtle px-6 py-4">
+            <Button variant="secondary" onClick={onClose}>
+              {t('newApp.Cancel', { ns: 'app' })}
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleConfirm}
+              disabled={isImporting}
+            >
+              {isImporting && <span className="i-ri-loader-2-line mr-1 h-4 w-4 animate-spin" aria-hidden="true" />}
+              {t('marketplace.template.importConfirm', { ns: 'app' })}
+            </Button>
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export default ImportFromMarketplaceTemplateModal

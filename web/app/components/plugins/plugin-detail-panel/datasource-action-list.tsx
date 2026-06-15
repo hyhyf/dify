@@ -1,6 +1,5 @@
 // import { useAppContext } from '@/context/app-context'
 // import Button from '@/app/components/base/button'
-// import Toast from '@/app/components/base/toast'
 // import Indicator from '@/app/components/header/indicator'
 // import ToolItem from '@/app/components/tools/provider/tool-item'
 // import ConfigCredential from '@/app/components/tools/setting/build-in/config-credentials'
@@ -35,10 +34,6 @@ const ActionList = ({
   // const [showSettingAuth, setShowSettingAuth] = useState(false)
 
   // const handleCredentialSettingUpdate = () => {
-  //   Toast.notify({
-  //     type: 'success',
-  //     message: t('common.api.actionSuccess'),
-  //   })
   //   setShowSettingAuth(false)
   // }
 
@@ -56,7 +51,7 @@ const ActionList = ({
   return (
     <div className="px-4 pb-4 pt-2">
       <div className="mb-1 py-1">
-        <div className="system-sm-semibold-uppercase mb-1 flex h-6 items-center justify-between text-text-secondary">
+        <div className="mb-1 flex h-6 items-center justify-between text-text-secondary system-sm-semibold-uppercase">
           {t('detailPanel.actionNum', { ns: 'plugin', num: data.length, action: data.length > 1 ? 'actions' : 'action' })}
           {/* {provider.is_team_authorization && provider.allow_delete && (
             <Button
@@ -76,7 +71,7 @@ const ActionList = ({
             className='w-full'
             onClick={() => setShowSettingAuth(true)}
             disabled={!isCurrentWorkspaceManager}
-          >{t('workflow.nodes.tool.authorize')}</Button>
+          >{t('nodes.tool.authorize', { ns: 'workflow' })}</Button>
         )} */}
       </div>
       {/* <div className='flex flex-col gap-2'>

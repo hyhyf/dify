@@ -47,13 +47,13 @@ vi.mock('ahooks', () => ({
   },
 }))
 
-vi.mock('next/navigation', () => ({
+vi.mock('@/next/navigation', () => ({
   useRouter: () => ({
     push: vi.fn(),
   }),
 }))
 
-vi.mock('next/link', () => ({
+vi.mock('@/next/link', () => ({
   default: ({ children, href }: { children: React.ReactNode, href: string }) => <a href={href}>{children}</a>,
 }))
 
@@ -170,6 +170,7 @@ const createMockApp = (overrides: Partial<App> = {}): App => ({
   icon_url: null,
   use_icon_as_answer_icon: false,
   mode: 'workflow' as AppModeEnum,
+  runtime_type: 'classic' as const,
   enable_site: true,
   enable_api: true,
   api_rpm: 60,

@@ -1,7 +1,9 @@
-import type { Memory, PromptItem, ValueSelector, Var, Variable } from '../../types'
+import type { Memory, PromptItem, PromptTemplateItem, ValueSelector, Var, Variable } from '../../types'
 import type { LLMNodeType, StructuredOutput } from './types'
 import { produce } from 'immer'
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { useStore as useAppStore } from '@/app/components/app/store'
+import { useFeatures } from '@/app/components/base/features/hooks'
 import { checkHasContextBlock, checkHasHistoryBlock, checkHasQueryBlock } from '@/app/components/base/prompt-editor/constants'
 import {
   ModelFeatureEnum,
@@ -23,6 +25,9 @@ import useAvailableVarList from '../_base/hooks/use-available-var-list'
 const useConfig = (id: string, payload: LLMNodeType) => {
   const { nodesReadOnly: readOnly } = useNodesReadOnly()
   const isChatMode = useIsChatMode()
+  const isSandboxRuntime = useAppStore(s => s.appDetail?.runtime_type === 'sandboxed')
+  const features = useFeatures(s => s.features)
+  const isSupportSandbox = isSandboxRuntime || features.sandbox?.enabled === true
 
   const defaultConfig = useStore(s => s.nodesDefaultConfigs)?.[payload.type]
   const [defaultRolePrefix, setDefaultRolePrefix] = useState<{ user: string, assistant: string }>({ user: '', assistant: '' })
@@ -35,17 +40,47 @@ const useConfig = (id: string, payload: LLMNodeType) => {
   const { deleteNodeInspectorVars } = useInspectVarsCrud()
 
   const setInputs = useCallback((newInputs: LLMNodeType) => {
+    let newPayload = { ...newInputs }
     if (newInputs.memory && !newInputs.memory.role_prefix) {
-      const newPayload = produce(newInputs, (draft) => {
+      newPayload = produce(newInputs, (draft) => {
         draft.memory!.role_prefix = defaultRolePrefix
       })
-      doSetInputs(newPayload)
-      inputRef.current = newPayload
-      return
     }
-    doSetInputs(newInputs)
-    inputRef.current = newInputs
-  }, [doSetInputs, defaultRolePrefix])
+
+    // sandbox engine
+    if (isSupportSandbox) {
+      const isSupportSkill = !!newPayload.computer_use
+      if (Array.isArray(newPayload.prompt_template)) {
+        newPayload = produce(newPayload, (draft) => {
+          draft.prompt_template = (draft.prompt_template as PromptItem[]).map((item) => {
+            return {
+              ...item,
+              skill: isSupportSkill,
+            }
+          })
+        })
+      }
+      else {
+        newPayload = produce(newPayload, (draft) => {
+          draft.prompt_template = {
+            ...draft.prompt_template,
+            skill: isSupportSkill,
+          }
+        })
+      }
+
+      newPayload = produce(newPayload, (draft) => {
+        delete draft.reasoning_format
+      })
+    }
+    else {
+      newPayload = produce(newPayload, (draft) => {
+        draft.computer_use = false
+      })
+    }
+    doSetInputs(newPayload)
+    inputRef.current = newPayload
+  }, [doSetInputs, defaultRolePrefix, isSupportSandbox])
 
   // model
   const model = inputs.model
@@ -158,6 +193,13 @@ const useConfig = (id: string, payload: LLMNodeType) => {
     setInputs(newInputs)
   }, [setInputs])
 
+  const handleComputerUseChange = useCallback((enabled: boolean) => {
+    const newInputs = produce(inputRef.current, (draft) => {
+      draft.computer_use = enabled
+    })
+    setInputs(newInputs)
+  }, [setInputs])
+
   // change to vision model to set vision enabled, else disabled
   useEffect(() => {
     if (!modelChanged)
@@ -249,7 +291,7 @@ const useConfig = (id: string, payload: LLMNodeType) => {
     setInputs(newInputs)
   }, [setInputs])
 
-  const handlePromptChange = useCallback((newPrompt: PromptItem[] | PromptItem) => {
+  const handlePromptChange = useCallback((newPrompt: PromptTemplateItem[] | PromptItem) => {
     const newInputs = produce(inputRef.current, (draft) => {
       draft.prompt_template = newPrompt
     })
@@ -283,12 +325,17 @@ const useConfig = (id: string, payload: LLMNodeType) => {
 
   // structure output
   const { data: modelList } = useModelList(ModelTypeEnum.textGeneration)
-  const isModelSupportStructuredOutput = modelList
+  const currentModelFeatures = modelList
     ?.find(provideItem => provideItem.provider === model?.provider)
     ?.models
     .find(modelItem => modelItem.model === model?.name)
     ?.features
-    ?.includes(ModelFeatureEnum.StructuredOutput)
+
+  const isModelSupportStructuredOutput = currentModelFeatures?.includes(ModelFeatureEnum.StructuredOutput)
+
+  const isModelSupportToolCall = currentModelFeatures?.some(
+    feature => [ModelFeatureEnum.toolCall, ModelFeatureEnum.multiToolCall, ModelFeatureEnum.streamToolCall].includes(feature),
+  )
 
   const [structuredOutputCollapsed, setStructuredOutputCollapsed] = useState(true)
   const handleStructureOutputEnableChange = useCallback((enabled: boolean) => {
@@ -310,24 +357,27 @@ const useConfig = (id: string, payload: LLMNodeType) => {
   }, [setInputs, deleteNodeInspectorVars, id])
 
   const filterInputVar = useCallback((varPayload: Var) => {
-    return [VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.file, VarType.arrayFile].includes(varPayload.type)
+    return ([VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.file, VarType.arrayFile] as VarType[]).includes(varPayload.type)
   }, [])
 
   const filterJinja2InputVar = useCallback((varPayload: Var) => {
-    return [VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.arrayBoolean, VarType.arrayObject, VarType.object, VarType.array, VarType.boolean].includes(varPayload.type)
+    return ([VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.arrayBoolean, VarType.arrayObject, VarType.object, VarType.array, VarType.boolean] as VarType[]).includes(varPayload.type)
   }, [])
 
   const filterMemoryPromptVar = useCallback((varPayload: Var) => {
-    return [VarType.arrayObject, VarType.array, VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.file, VarType.arrayFile].includes(varPayload.type)
+    return ([VarType.arrayObject, VarType.array, VarType.number, VarType.string, VarType.secret, VarType.arrayString, VarType.arrayNumber, VarType.file, VarType.arrayFile] as VarType[]).includes(varPayload.type)
   }, [])
 
   // reasoning format
   const handleReasoningFormatChange = useCallback((reasoningFormat: 'tagged' | 'separated') => {
+    if (isSupportSandbox)
+      return
+
     const newInputs = produce(inputRef.current, (draft) => {
       draft.reasoning_format = reasoningFormat
     })
     setInputs(newInputs)
-  }, [setInputs])
+  }, [isSupportSandbox, setInputs])
 
   const {
     availableVars,
@@ -364,12 +414,15 @@ const useConfig = (id: string, payload: LLMNodeType) => {
     handleVisionResolutionEnabledChange,
     handleVisionResolutionChange,
     isModelSupportStructuredOutput,
+    isModelSupportToolCall,
     handleStructureOutputChange,
     structuredOutputCollapsed,
     setStructuredOutputCollapsed,
     handleStructureOutputEnableChange,
     filterJinja2InputVar,
     handleReasoningFormatChange,
+    isSupportSandbox,
+    handleComputerUseChange,
   }
 }
 

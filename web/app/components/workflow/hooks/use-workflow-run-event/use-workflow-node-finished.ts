@@ -37,18 +37,27 @@ export const useWorkflowNodeFinished = () => {
     }))
 
     const newNodes = produce(nodes, (draft) => {
-      const currentNode = draft.find(node => node.id === data.node_id)!
+      const currentNode = draft.find(node => node.id === data.node_id)
+      // Skip if node not found (e.g., virtual extraction nodes)
+      if (!currentNode)
+        return
       currentNode.data._runningStatus = data.status
       if (data.status === NodeRunningStatus.Exception) {
         if (data.execution_metadata?.error_strategy === ErrorHandleTypeEnum.failBranch)
           currentNode.data._runningBranchId = ErrorHandleTypeEnum.failBranch
       }
       else {
+        const rawOutputs = data.outputs
+        const outputRecord = rawOutputs && typeof rawOutputs === 'object' && !Array.isArray(rawOutputs)
+          ? rawOutputs as Record<string, string | undefined>
+          : undefined
         if (data.node_type === BlockEnum.IfElse)
-          currentNode.data._runningBranchId = data?.outputs?.selected_case_id
+          currentNode.data._runningBranchId = outputRecord?.selected_case_id
 
         if (data.node_type === BlockEnum.QuestionClassifier)
-          currentNode.data._runningBranchId = data?.outputs?.class_id
+          currentNode.data._runningBranchId = outputRecord?.class_id
+        if (data.node_type === BlockEnum.HumanInput)
+          currentNode.data._runningBranchId = outputRecord?.__action_id
       }
     })
     setNodes(newNodes)

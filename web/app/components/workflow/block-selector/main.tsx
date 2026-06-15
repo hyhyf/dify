@@ -8,7 +8,7 @@ import type {
 } from 'react'
 import type {
   CommonNodeType,
-  NodeDefault,
+  NodeDefaultBase,
   OnSelectBlock,
   ToolWithProvider,
 } from '../types'
@@ -49,7 +49,7 @@ export type NodeSelectorProps = {
   asChild?: boolean
   availableBlocksTypes?: BlockEnum[]
   disabled?: boolean
-  blocks?: NodeDefault[]
+  blocks?: NodeDefaultBase[]
   dataSources?: ToolWithProvider[]
   noBlocks?: boolean
   noTools?: boolean
@@ -203,7 +203,7 @@ const NodeSelector: FC<NodeSelectorProps> = ({
               )
         }
       </PortalToFollowElemTrigger>
-      <PortalToFollowElemContent className="z-[1000]">
+      <PortalToFollowElemContent className="z-[1002]">
         <div className={`rounded-lg border-[0.5px] border-components-panel-border bg-components-panel-bg shadow-lg ${popupClassName}`}>
           <Tabs
             tabs={tabs}

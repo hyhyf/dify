@@ -12,7 +12,7 @@ import type { ToolDefaultValue, ToolValue } from './types'
 import type { ListProps, ListRef } from '@/app/components/workflow/block-selector/market-place-plugin/list'
 import type { OnSelectBlock } from '@/app/components/workflow/types'
 import { RiArrowRightUpLine } from '@remixicon/react'
-import Link from 'next/link'
+import { useEventListener } from 'ahooks'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
@@ -21,6 +21,7 @@ import { SearchMenu } from '@/app/components/base/icons/src/vender/line/general'
 import PluginList from '@/app/components/workflow/block-selector/market-place-plugin/list'
 import { useGlobalPublicStore } from '@/context/global-public-context'
 import { useGetLanguage } from '@/context/i18n'
+import Link from '@/next/link'
 import { cn } from '@/utils/classnames'
 import { getMarketplaceUrl } from '@/utils/var'
 import { useMarketplacePlugins } from '../../plugins/marketplace/hooks'
@@ -53,6 +54,10 @@ type AllToolsProps = {
   featuredLoading?: boolean
   showFeatured?: boolean
   onFeaturedInstallSuccess?: () => Promise<void> | void
+  hideFeaturedTool?: boolean
+  hideSelectedInfo?: boolean
+  enableKeyboardNavigation?: boolean
+  onClose?: () => void
 }
 
 const DEFAULT_TAGS: AllToolsProps['tags'] = []
@@ -76,12 +81,19 @@ const AllTools = ({
   featuredLoading = false,
   showFeatured = false,
   onFeaturedInstallSuccess,
+  hideFeaturedTool = false,
+  hideSelectedInfo = false,
+  enableKeyboardNavigation = false,
+  onClose,
 }: AllToolsProps) => {
   const { t } = useTranslation()
   const language = useGetLanguage()
   const tabs = useToolTabs()
   const [activeTab, setActiveTab] = useState(ToolTypeEnum.All)
   const [activeView, setActiveView] = useState<ViewType>(ViewType.flat)
+  const activeIndexRef = useRef(-1)
+  const itemElementsRef = useRef<HTMLElement[]>([])
+  const highlightedElementRef = useRef<HTMLElement | null>(null)
   const trimmedSearchText = searchText.trim()
   const hasSearchText = trimmedSearchText.length > 0
   const hasTags = tags.length > 0
@@ -184,6 +196,34 @@ const AllTools = ({
   const pluginRef = useRef<ListRef>(null)
   const wrapElemRef = useRef<HTMLDivElement>(null)
   const isSupportGroupView = [ToolTypeEnum.All, ToolTypeEnum.BuiltIn].includes(activeTab)
+  const refreshKeyboardItems = useCallback(() => {
+    if (!wrapElemRef.current) {
+      itemElementsRef.current = []
+      return []
+    }
+    const items = Array.from(wrapElemRef.current.querySelectorAll<HTMLElement>('[data-tool-picker-item="true"]'))
+    itemElementsRef.current = items
+    return items
+  }, [])
+  const clearHighlight = useCallback(() => {
+    if (highlightedElementRef.current)
+      highlightedElementRef.current.classList.remove('bg-state-base-hover')
+    highlightedElementRef.current = null
+    activeIndexRef.current = -1
+  }, [])
+  const applyHighlight = useCallback((index: number, items: HTMLElement[]) => {
+    if (highlightedElementRef.current)
+      highlightedElementRef.current.classList.remove('bg-state-base-hover')
+    const nextItem = items[index]
+    if (nextItem) {
+      nextItem.classList.add('bg-state-base-hover')
+      highlightedElementRef.current = nextItem
+      activeIndexRef.current = index
+      return
+    }
+    highlightedElementRef.current = null
+    activeIndexRef.current = -1
+  }, [])
 
   const isShowRAGRecommendations = isInRAGPipeline && activeTab === ToolTypeEnum.All && !hasFilter
   const hasToolsListContent = tools.length > 0 || isShowRAGRecommendations
@@ -194,7 +234,47 @@ const AllTools = ({
     && !isInRAGPipeline
     && activeTab === ToolTypeEnum.All
     && !hasFilter
+    && !hideFeaturedTool
   const shouldShowMarketplaceFooter = enable_marketplace && !hasFilter
+
+  useEffect(() => {
+    if (!enableKeyboardNavigation) {
+      itemElementsRef.current = []
+      clearHighlight()
+      return
+    }
+    const items = refreshKeyboardItems()
+    if (activeIndexRef.current >= items.length)
+      clearHighlight()
+  }, [enableKeyboardNavigation, refreshKeyboardItems, clearHighlight, tools, activeTab, activeView, hasSearchText])
+
+  useEventListener('keydown', (event: KeyboardEvent) => {
+    if (!enableKeyboardNavigation)
+      return
+    const items = refreshKeyboardItems()
+    if (items.length === 0)
+      return
+    if (!['ArrowDown', 'ArrowUp', 'Enter', 'Escape'].includes(event.key))
+      return
+    event.preventDefault()
+    event.stopPropagation()
+    if (event.key === 'Escape') {
+      onClose?.()
+      return
+    }
+    if (event.key === 'Enter') {
+      const index = activeIndexRef.current
+      if (index < 0 || index >= items.length)
+        return
+      items[index]?.click()
+      return
+    }
+    const delta = event.key === 'ArrowDown' ? 1 : -1
+    const baseIndex = activeIndexRef.current < 0 ? -1 : activeIndexRef.current
+    const nextIndex = Math.min(Math.max(baseIndex + delta, 0), items.length - 1)
+    applyHighlight(nextIndex, items)
+    items[nextIndex]?.scrollIntoView({ block: 'nearest' })
+  }, { target: typeof document !== 'undefined' ? document : undefined, capture: true })
 
   const handleRAGSelect = useCallback<OnSelectBlock>((type, pluginDefaultValue) => {
     if (!pluginDefaultValue)
@@ -259,9 +339,11 @@ const AllTools = ({
             )}
             {hasToolsListContent && (
               <>
-                <div className="px-3 pb-1 pt-2">
-                  <span className="system-xs-medium text-text-primary">{t('allTools', { ns: 'tools' })}</span>
-                </div>
+                {!hideFeaturedTool && (
+                  <div className="px-3 pb-1 pt-2">
+                    <span className="text-text-primary system-xs-medium">{t('allTools', { ns: 'tools' })}</span>
+                  </div>
+                )}
                 <Tools
                   className={toolContentClassName}
                   tools={tools}
@@ -272,6 +354,7 @@ const AllTools = ({
                   viewType={isSupportGroupView ? activeView : ViewType.flat}
                   hasSearchText={hasSearchText}
                   selectedTools={selectedTools}
+                  hideSelectedInfo={hideSelectedInfo}
                 />
               </>
             )}

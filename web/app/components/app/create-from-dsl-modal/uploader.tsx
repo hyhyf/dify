@@ -7,10 +7,9 @@ import {
 import * as React from 'react'
 import { useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import { useContext } from 'use-context-selector'
 import ActionButton from '@/app/components/base/action-button'
 import { Yaml as YamlIcon } from '@/app/components/base/icons/src/public/files'
-import { ToastContext } from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { cn } from '@/utils/classnames'
 import { formatFileSize } from '@/utils/format'
 
@@ -30,7 +29,6 @@ const Uploader: FC<Props> = ({
   displayName = 'YAML',
 }) => {
   const { t } = useTranslation()
-  const { notify } = useContext(ToastContext)
   const [dragging, setDragging] = useState(false)
   const dropRef = useRef<HTMLDivElement>(null)
   const dragRef = useRef<HTMLDivElement>(null)
@@ -60,7 +58,7 @@ const Uploader: FC<Props> = ({
       return
     const files = Array.from(e.dataTransfer.files)
     if (files.length > 1) {
-      notify({ type: 'error', message: t('stepOne.uploader.validation.count', { ns: 'datasetCreation' }) })
+      toast.error(t('stepOne.uploader.validation.count', { ns: 'datasetCreation' }))
       return
     }
     updateFile(files[0])
@@ -109,19 +107,26 @@ const Uploader: FC<Props> = ({
       />
       <div ref={dropRef}>
         {!file && (
-          <div className={cn('flex h-12 items-center rounded-[10px] border border-dashed border-components-dropzone-border bg-components-dropzone-bg text-sm font-normal', dragging && 'border-components-dropzone-border-accent bg-components-dropzone-bg-accent')}>
-            <div className="flex w-full items-center justify-center space-x-2">
-              <RiUploadCloud2Line className="h-6 w-6 text-text-tertiary" />
-              <div className="text-text-tertiary">
+          <div
+            className={cn(
+              'relative flex items-center justify-center rounded-[10px] border border-dashed border-components-dropzone-border bg-components-dropzone-bg px-4 py-[14px]',
+              dragging && 'border-components-dropzone-border-accent bg-components-dropzone-bg-accent',
+            )}
+          >
+            <div className="flex items-center gap-2">
+              <RiUploadCloud2Line className="h-5 w-5 text-text-tertiary" />
+              <div className="text-[13px] font-medium leading-4 text-text-secondary">
                 {t('dslUploader.button', { ns: 'app' })}
-                <span className="cursor-pointer pl-1 text-text-accent" onClick={selectHandle}>{t('dslUploader.browse', { ns: 'app' })}</span>
+                <span className="cursor-pointer pl-1 text-text-accent" onClick={selectHandle}>
+                  {t('dslUploader.browse', { ns: 'app' })}
+                </span>
               </div>
             </div>
             {dragging && <div ref={dragRef} className="absolute left-0 top-0 h-full w-full" />}
           </div>
         )}
         {file && (
-          <div className={cn('group flex items-center rounded-lg border-[0.5px] border-components-panel-border bg-components-panel-on-panel-item-bg shadow-xs', ' hover:bg-components-panel-on-panel-item-bg-hover')}>
+          <div className={cn('group flex items-center rounded-lg border-[0.5px] border-components-panel-border bg-components-panel-on-panel-item-bg shadow-xs', 'hover:bg-components-panel-on-panel-item-bg-hover')}>
             <div className="flex items-center justify-center p-3">
               <YamlIcon className="h-6 w-6 shrink-0" />
             </div>

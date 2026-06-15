@@ -1,0 +1,146 @@
+'use client'
+
+import type { RefObject } from 'react'
+import type { TreeApi } from 'react-arborist'
+import type { TreeNodeData } from '../../../type'
+import type { AppAssetTreeResponse } from '@/types/app-asset'
+import { useCallback, useEffect, useRef } from 'react'
+import { useTranslation } from 'react-i18next'
+import { useStore as useAppStore } from '@/app/components/app/store'
+import { toast } from '@/app/components/base/ui/toast'
+import { useWorkflowStore } from '@/app/components/workflow/store'
+import { useMoveAppAssetNode } from '@/service/use-app-asset'
+import { findNodeById, getTargetFolderIdFromSelection, isDescendantOf, toApiParentId } from '../../../utils/tree-utils'
+import { useSkillTreeUpdateEmitter } from '../data/use-skill-tree-collaboration'
+
+type UsePasteOperationOptions = {
+  treeRef: RefObject<TreeApi<TreeNodeData> | null>
+  treeData?: AppAssetTreeResponse
+  enabled?: boolean
+}
+
+type UsePasteOperationReturn = {
+  isPasting: boolean
+  handlePaste: () => void
+}
+
+export function usePasteOperation({
+  treeRef,
+  treeData,
+  enabled = true,
+}: UsePasteOperationOptions): UsePasteOperationReturn {
+  const { t } = useTranslation('workflow')
+  const storeApi = useWorkflowStore()
+  const appDetail = useAppStore(s => s.appDetail)
+  const appId = appDetail?.id || ''
+  const { mutateAsync: moveNodeAsync, isPending: isPasting } = useMoveAppAssetNode()
+  const emitTreeUpdate = useSkillTreeUpdateEmitter()
+  const isPastingRef = useRef(false)
+
+  const handlePaste = useCallback(async () => {
+    if (isPastingRef.current)
+      return
+
+    const clipboard = storeApi.getState().clipboard
+    if (!clipboard || clipboard.nodeIds.size === 0)
+      return
+
+    const { operation, nodeIds } = clipboard
+    const tree = treeRef.current
+    const treeChildren = treeData?.children ?? []
+
+    const selectedId = tree?.selectedNodes[0]?.id ?? storeApi.getState().selectedTreeNodeId
+    const targetFolderId = getTargetFolderIdFromSelection(selectedId, treeChildren)
+    const targetParentId = toApiParentId(targetFolderId)
+
+    if (operation === 'cut') {
+      const nodeIdsArray = [...nodeIds]
+      const isMovingToSelf = nodeIdsArray.some((nodeId) => {
+        const node = findNodeById(treeChildren, nodeId)
+        if (!node)
+          return false
+        if (node.node_type === 'folder' && nodeId === targetFolderId)
+          return true
+        return false
+      })
+
+      const isMovingToDescendant = nodeIdsArray.some((nodeId) => {
+        const node = findNodeById(treeChildren, nodeId)
+        if (!node || node.node_type !== 'folder')
+          return false
+        return isDescendantOf(targetFolderId, nodeId, treeChildren)
+      })
+
+      if (isMovingToSelf) {
+        toast.error(t('skillSidebar.menu.cannotMoveToSelf'))
+        return
+      }
+
+      if (isMovingToDescendant) {
+        toast.error(t('skillSidebar.menu.cannotMoveToDescendant'))
+        return
+      }
+
+      isPastingRef.current = true
+
+      try {
+        const results = await Promise.allSettled(
+          nodeIdsArray.map(async (nodeId) => {
+            await moveNodeAsync({
+              appId,
+              nodeId,
+              payload: { parent_id: targetParentId },
+            })
+            return nodeId
+          }),
+        )
+
+        const succeededNodeIds = results.flatMap(result =>
+          result.status === 'fulfilled' ? [result.value] : [],
+        )
+        const failedNodeIds = results.flatMap((result, index) =>
+          result.status === 'rejected' ? [nodeIdsArray[index]] : [],
+        )
+
+        if (succeededNodeIds.length > 0)
+          emitTreeUpdate()
+
+        if (failedNodeIds.length === 0) {
+          storeApi.getState().clearClipboard()
+          toast.success(t('skillSidebar.menu.moved'))
+          return
+        }
+
+        if (succeededNodeIds.length > 0)
+          storeApi.getState().cutNodes(failedNodeIds)
+
+        toast.error(t('skillSidebar.menu.moveError'))
+      }
+      catch {
+        toast.error(t('skillSidebar.menu.moveError'))
+      }
+      finally {
+        isPastingRef.current = false
+      }
+    }
+  }, [appId, moveNodeAsync, storeApi, t, treeData?.children, treeRef, emitTreeUpdate])
+
+  useEffect(() => {
+    if (!enabled)
+      return
+
+    const handlePasteEvent = () => {
+      handlePaste()
+    }
+
+    window.addEventListener('skill:paste', handlePasteEvent)
+    return () => {
+      window.removeEventListener('skill:paste', handlePasteEvent)
+    }
+  }, [enabled, handlePaste])
+
+  return {
+    isPasting,
+    handlePaste,
+  }
+}

@@ -5,7 +5,6 @@ import {
   RiDeleteBinLine,
 } from '@remixicon/react'
 import copy from 'copy-to-clipboard'
-// abandoned
 import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useContext } from 'use-context-selector'
@@ -15,14 +14,22 @@ import {
 } from '@/app/components/base/icons/src/vender/line/general'
 import { Tool03 } from '@/app/components/base/icons/src/vender/solid/general'
 import Switch from '@/app/components/base/switch'
-import { useToastContext } from '@/app/components/base/toast'
-import Tooltip from '@/app/components/base/tooltip'
+import { toast } from '@/app/components/base/ui/toast'
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from '@/app/components/base/ui/tooltip'
 import ConfigContext from '@/context/debug-configuration'
 import { useModalContext } from '@/context/modal-context'
+import {
+  findExternalDataToolVariableConflict,
+  removeExternalDataTool,
+  upsertExternalDataTool,
+} from './helpers'
 
 const Tools = () => {
   const { t } = useTranslation()
-  const { notify } = useToastContext()
   const { setShowExternalDataToolModal } = useModalContext()
   const {
     externalDataToolsConfig,
@@ -33,42 +40,20 @@ const Tools = () => {
   const [copied, setCopied] = useState(false)
 
   const handleSaveExternalDataToolModal = (externalDataTool: ExternalDataTool, index: number) => {
-    if (index > -1) {
-      setExternalDataToolsConfig([
-        ...externalDataToolsConfig.slice(0, index),
-        externalDataTool,
-        ...externalDataToolsConfig.slice(index + 1),
-      ])
-    }
-    else {
-      setExternalDataToolsConfig([...externalDataToolsConfig, externalDataTool])
-    }
+    setExternalDataToolsConfig(upsertExternalDataTool(externalDataToolsConfig, externalDataTool, index))
   }
+
   const handleValidateBeforeSaveExternalDataToolModal = (newExternalDataTool: ExternalDataTool, index: number) => {
     const promptVariables = modelConfig?.configs?.prompt_variables || []
-    for (let i = 0; i < promptVariables.length; i++) {
-      if (promptVariables[i].key === newExternalDataTool.variable) {
-        notify({ type: 'error', message: t('varKeyError.keyAlreadyExists', { ns: 'appDebug', key: promptVariables[i].key }) })
-        return false
-      }
-    }
-
-    let existedExternalDataTools = []
-    if (index > -1) {
-      existedExternalDataTools = [
-        ...externalDataToolsConfig.slice(0, index),
-        ...externalDataToolsConfig.slice(index + 1),
-      ]
-    }
-    else {
-      existedExternalDataTools = [...externalDataToolsConfig]
-    }
-
-    for (let i = 0; i < existedExternalDataTools.length; i++) {
-      if (existedExternalDataTools[i].variable === newExternalDataTool.variable) {
-        notify({ type: 'error', message: t('varKeyError.keyAlreadyExists', { ns: 'appDebug', key: existedExternalDataTools[i].variable }) })
-        return false
-      }
+    const conflictKey = findExternalDataToolVariableConflict(
+      newExternalDataTool.variable,
+      externalDataToolsConfig,
+      promptVariables,
+      index,
+    )
+    if (conflictKey) {
+      toast.error(t('varKeyError.keyAlreadyExists', { ns: 'appDebug', key: conflictKey }))
+      return false
     }
 
     return true
@@ -110,13 +95,14 @@ const Tools = () => {
           <div className="mr-1 text-sm font-semibold text-gray-800">
             {t('feature.tools.title', { ns: 'appDebug' })}
           </div>
-          <Tooltip
-            popupContent={(
+          <Tooltip>
+            <TooltipTrigger render={<span className="i-ri-question-line ml-1 h-4 w-4 shrink-0 text-text-quaternary" />} />
+            <TooltipContent>
               <div className="max-w-[160px]">
                 {t('feature.tools.tips', { ns: 'appDebug' })}
               </div>
-            )}
-          />
+            </TooltipContent>
+          </Tooltip>
         </div>
         {
           !expanded && !!externalDataToolsConfig.length && (
@@ -130,7 +116,7 @@ const Tools = () => {
           className="flex h-7 cursor-pointer items-center px-3 text-xs font-medium text-gray-700"
           onClick={() => handleOpenExternalDataToolModal({}, -1)}
         >
-          <RiAddLine className="mr-[5px] h-3.5 w-3.5 " />
+          <RiAddLine className="mr-[5px] h-3.5 w-3.5" />
           {t('operation.add', { ns: 'common' })}
         </div>
       </div>
@@ -151,18 +137,23 @@ const Tools = () => {
                       background={item.icon_background}
                     />
                     <div className="mr-2 text-[13px] font-medium text-gray-800">{item.label}</div>
-                    <Tooltip
-                      popupContent={copied ? t('copied', { ns: 'appApi' }) : `${item.variable}, ${t('copy', { ns: 'appApi' })}`}
-                    >
-                      <div
-                        className="text-xs text-gray-500"
-                        onClick={() => {
-                          copy(item.variable || '')
-                          setCopied(true)
-                        }}
-                      >
-                        {item.variable}
-                      </div>
+                    <Tooltip>
+                      <TooltipTrigger
+                        render={(
+                          <div
+                            className="text-xs text-gray-500"
+                            onClick={() => {
+                              copy(item.variable || '')
+                              setCopied(true)
+                            }}
+                          >
+                            {item.variable}
+                          </div>
+                        )}
+                      />
+                      <TooltipContent>
+                        {copied ? t('copied', { ns: 'appApi' }) : `${item.variable}, ${t('copy', { ns: 'appApi' })}`}
+                      </TooltipContent>
                     </Tooltip>
                   </div>
                   <div
@@ -173,14 +164,14 @@ const Tools = () => {
                   </div>
                   <div
                     className="group/action hidden h-6 w-6 cursor-pointer items-center justify-center rounded-md hover:bg-[#FEE4E2] group-hover:flex"
-                    onClick={() => setExternalDataToolsConfig([...externalDataToolsConfig.slice(0, index), ...externalDataToolsConfig.slice(index + 1)])}
+                    onClick={() => setExternalDataToolsConfig(removeExternalDataTool(externalDataToolsConfig, index))}
                   >
                     <RiDeleteBinLine className="h-4 w-4 text-gray-500 group-hover/action:text-[#D92D20]" />
                   </div>
                   <div className="ml-2 mr-3 hidden h-3.5 w-[1px] bg-gray-200 group-hover:block" />
                   <Switch
-                    size="l"
-                    defaultValue={item.enabled}
+                    size="lg"
+                    value={item.enabled ?? false}
                     onChange={(enabled: boolean) => handleSaveExternalDataToolModal({ ...item, enabled }, index)}
                   />
                 </div>

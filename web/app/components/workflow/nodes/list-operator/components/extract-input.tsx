@@ -28,12 +28,12 @@ const ExtractInput: FC<Props> = ({
   const { availableVars, availableNodesWithParent } = useAvailableVarList(nodeId, {
     onlyLeafNodeVar: false,
     filterVar: (varPayload: Var) => {
-      return [VarType.number].includes(varPayload.type)
+      return ([VarType.number] as VarType[]).includes(varPayload.type)
     },
   })
 
   return (
-    <div className="flex items-start  space-x-1">
+    <div className="flex items-start space-x-1">
       <Input
         instanceId="http-extract-number"
         className={cn(isFocus ? 'border-components-input-border-active bg-components-input-bg-active shadow-xs' : 'border-components-input-border-hover bg-components-input-bg-normal', 'w-0 grow rounded-lg border px-3 py-[6px]')}

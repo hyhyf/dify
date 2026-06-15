@@ -1,8 +1,9 @@
 import logging
+import re
 import time
 from collections.abc import Generator
 from threading import Thread
-from typing import Union, cast
+from typing import Any, Union, cast
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
@@ -44,22 +45,32 @@ from core.app.entities.task_entities import (
 )
 from core.app.task_pipeline.based_generate_task_pipeline import BasedGenerateTaskPipeline
 from core.app.task_pipeline.message_cycle_manager import MessageCycleManager
+from core.app.task_pipeline.message_file_utils import prepare_file_dict
 from core.base.tts import AppGeneratorTTSPublisher, AudioTrunk
 from core.model_manager import ModelInstance
-from core.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk, LLMResultChunkDelta, LLMUsage
-from core.model_runtime.entities.message_entities import (
-    AssistantPromptMessage,
-    TextPromptMessageContent,
-)
-from core.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
 from core.ops.entities.trace_entity import TraceTaskName
 from core.ops.ops_trace_manager import TraceQueueManager, TraceTask
 from core.prompt.utils.prompt_message_util import PromptMessageUtil
 from core.prompt.utils.prompt_template_parser import PromptTemplateParser
+from dify_graph.file.enums import FileTransferMethod
+from dify_graph.model_runtime.entities.llm_entities import LLMResult, LLMResultChunk, LLMResultChunkDelta, LLMUsage
+from dify_graph.model_runtime.entities.message_entities import (
+    AssistantPromptMessage,
+    TextPromptMessageContent,
+)
+from dify_graph.model_runtime.model_providers.__base.large_language_model import LargeLanguageModel
 from events.message_event import message_was_created
 from extensions.ext_database import db
 from libs.datetime_utils import naive_utc_now
-from models.model import AppMode, Conversation, Message, MessageAgentThought
+from models.model import (
+    AppMode,
+    Conversation,
+    LLMGenerationDetail,
+    Message,
+    MessageAgentThought,
+    MessageFile,
+    UploadFile,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -68,6 +79,8 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
     """
     EasyUIBasedGenerateTaskPipeline is a class that generate stream output and state management for Application.
     """
+
+    _THINK_PATTERN = re.compile(r"<think[^>]*>(.*?)</think>", re.IGNORECASE | re.DOTALL)
 
     _task_state: EasyUITaskState
     _application_generate_entity: Union[ChatAppGenerateEntity, CompletionAppGenerateEntity, AgentChatAppGenerateEntity]
@@ -154,7 +167,7 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
                             id=self._message_id,
                             mode=self._conversation_mode,
                             message_id=self._message_id,
-                            answer=cast(str, self._task_state.llm_result.message.content),
+                            answer=self._task_state.llm_result.message.get_text_content(),
                             created_at=self._message_created_at,
                             **extras,
                         ),
@@ -167,7 +180,7 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
                             mode=self._conversation_mode,
                             conversation_id=self._conversation_id,
                             message_id=self._message_id,
-                            answer=cast(str, self._task_state.llm_result.message.content),
+                            answer=self._task_state.llm_result.message.get_text_content(),
                             created_at=self._message_created_at,
                             **extras,
                         ),
@@ -216,14 +229,14 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
         tenant_id = self._application_generate_entity.app_config.tenant_id
         task_id = self._application_generate_entity.task_id
         publisher = None
-        text_to_speech_dict = self._app_config.app_model_config_dict.get("text_to_speech")
+        text_to_speech_dict = cast(dict[str, Any], self._app_config.app_model_config_dict.get("text_to_speech"))
         if (
             text_to_speech_dict
             and text_to_speech_dict.get("autoPlay") == "enabled"
             and text_to_speech_dict.get("enabled")
         ):
             publisher = AppGeneratorTTSPublisher(
-                tenant_id, text_to_speech_dict.get("voice", None), text_to_speech_dict.get("language", None)
+                tenant_id, text_to_speech_dict.get("voice", ""), text_to_speech_dict.get("language", None)
             )
         for response in self._process_stream_response(publisher=publisher, trace_manager=trace_manager):
             while True:
@@ -280,7 +293,7 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
 
                 # handle output moderation
                 output_moderation_answer = self.handle_output_moderation_when_task_finished(
-                    cast(str, self._task_state.llm_result.message.content)
+                    self._task_state.llm_result.message.get_text_content()
                 )
                 if output_moderation_answer:
                     self._task_state.llm_result.message.content = output_moderation_answer
@@ -394,7 +407,7 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
         message.message_unit_price = usage.prompt_unit_price
         message.message_price_unit = usage.prompt_price_unit
         message.answer = (
-            PromptTemplateParser.remove_template_variables(cast(str, llm_result.message.content).strip())
+            PromptTemplateParser.remove_template_variables(llm_result.message.get_text_content().strip())
             if llm_result.message.content
             else ""
         )
@@ -415,10 +428,135 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
                 )
             )
 
+        # Save LLM generation detail if there's reasoning_content
+        self._save_generation_detail(session=session, message=message, llm_result=llm_result)
+
         message_was_created.send(
             message,
             application_generate_entity=self._application_generate_entity,
         )
+
+    def _save_generation_detail(self, *, session: Session, message: Message, llm_result: LLMResult) -> None:
+        """
+        Save LLM generation detail for Completion/Chat/Agent-Chat applications.
+        For Agent-Chat, also merges MessageAgentThought records.
+        """
+        import json
+
+        reasoning_list: list[str] = []
+        tool_calls_list: list[dict] = []
+        sequence: list[dict] = []
+        answer = message.answer or ""
+
+        # Check if this is Agent-Chat mode by looking for agent thoughts
+        agent_thoughts = (
+            session.query(MessageAgentThought)
+            .filter_by(message_id=message.id)
+            .order_by(MessageAgentThought.position.asc())
+            .all()
+        )
+
+        if agent_thoughts:
+            # Agent-Chat mode: merge MessageAgentThought records
+            content_pos = 0
+            cleaned_answer_parts: list[str] = []
+            for thought in agent_thoughts:
+                # Add thought/reasoning
+                if thought.thought:
+                    reasoning_text = thought.thought
+                    if "<think" in reasoning_text.lower():
+                        clean_text, extracted_reasoning = self._split_reasoning_from_answer(reasoning_text)
+                        if extracted_reasoning:
+                            reasoning_text = extracted_reasoning
+                            thought.thought = clean_text or extracted_reasoning
+                    reasoning_list.append(reasoning_text)
+                    sequence.append({"type": "reasoning", "index": len(reasoning_list) - 1})
+
+                # Add tool calls
+                if thought.tool:
+                    tool_calls_list.append(
+                        {
+                            "name": thought.tool,
+                            "arguments": thought.tool_input or "",
+                            "result": thought.observation or "",
+                        }
+                    )
+                    sequence.append({"type": "tool_call", "index": len(tool_calls_list) - 1})
+
+                # Add answer content if present
+                if thought.answer:
+                    content_text = thought.answer
+                    if "<think" in content_text.lower():
+                        clean_answer, extracted_reasoning = self._split_reasoning_from_answer(content_text)
+                        if extracted_reasoning:
+                            reasoning_list.append(extracted_reasoning)
+                            sequence.append({"type": "reasoning", "index": len(reasoning_list) - 1})
+                        content_text = clean_answer
+                        thought.answer = clean_answer or content_text
+
+                    if content_text:
+                        start = content_pos
+                        end = content_pos + len(content_text)
+                        sequence.append({"type": "content", "start": start, "end": end})
+                        content_pos = end
+                        cleaned_answer_parts.append(content_text)
+
+            if cleaned_answer_parts:
+                merged_answer = "".join(cleaned_answer_parts)
+                message.answer = merged_answer
+                llm_result.message.content = merged_answer
+        else:
+            # Completion/Chat mode: use reasoning_content from llm_result
+            reasoning_content = llm_result.reasoning_content
+            if not reasoning_content and answer:
+                # Extract reasoning from <think> blocks and clean the final answer
+                clean_answer, reasoning_content = self._split_reasoning_from_answer(answer)
+                if reasoning_content:
+                    answer = clean_answer
+                    llm_result.message.content = clean_answer
+                    llm_result.reasoning_content = reasoning_content
+                    message.answer = clean_answer
+            if reasoning_content:
+                reasoning_list = [reasoning_content]
+                # Content comes first, then reasoning
+                if answer:
+                    sequence.append({"type": "content", "start": 0, "end": len(answer)})
+                sequence.append({"type": "reasoning", "index": 0})
+
+        # Only save if there's meaningful generation detail
+        if not reasoning_list and not tool_calls_list:
+            return
+
+        # Check if generation detail already exists
+        existing = session.query(LLMGenerationDetail).filter_by(message_id=message.id).first()
+
+        if existing:
+            existing.reasoning_content = json.dumps(reasoning_list) if reasoning_list else None
+            existing.tool_calls = json.dumps(tool_calls_list) if tool_calls_list else None
+            existing.sequence = json.dumps(sequence) if sequence else None
+        else:
+            generation_detail = LLMGenerationDetail(
+                tenant_id=self._application_generate_entity.app_config.tenant_id,
+                app_id=self._application_generate_entity.app_config.app_id,
+                message_id=message.id,
+                reasoning_content=json.dumps(reasoning_list) if reasoning_list else None,
+                tool_calls=json.dumps(tool_calls_list) if tool_calls_list else None,
+                sequence=json.dumps(sequence) if sequence else None,
+            )
+            session.add(generation_detail)
+
+    @classmethod
+    def _split_reasoning_from_answer(cls, text: str) -> tuple[str, str]:
+        """
+        Extract reasoning segments from <think> blocks and return (clean_text, reasoning).
+        """
+        matches = cls._THINK_PATTERN.findall(text)
+        reasoning_content = "\n".join(match.strip() for match in matches) if matches else ""
+
+        clean_text = cls._THINK_PATTERN.sub("", text)
+        clean_text = re.sub(r"\n\s*\n", "\n\n", clean_text).strip()
+
+        return clean_text, reasoning_content or ""
 
     def _handle_stop(self, event: QueueStopEvent):
         """
@@ -457,10 +595,38 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
         """
         self._task_state.metadata.usage = self._task_state.llm_result.usage
         metadata_dict = self._task_state.metadata.model_dump()
+
+        # Fetch files associated with this message
+        files = None
+        with Session(db.engine, expire_on_commit=False) as session:
+            message_files = session.scalars(select(MessageFile).where(MessageFile.message_id == self._message_id)).all()
+
+            if message_files:
+                # Fetch all required UploadFile objects in a single query to avoid N+1 problem
+                upload_file_ids = list(
+                    dict.fromkeys(
+                        mf.upload_file_id
+                        for mf in message_files
+                        if mf.transfer_method == FileTransferMethod.LOCAL_FILE and mf.upload_file_id
+                    )
+                )
+                upload_files_map = {}
+                if upload_file_ids:
+                    upload_files = session.scalars(select(UploadFile).where(UploadFile.id.in_(upload_file_ids))).all()
+                    upload_files_map = {uf.id: uf for uf in upload_files}
+
+                files_list = []
+                for message_file in message_files:
+                    file_dict = prepare_file_dict(message_file, upload_files_map)
+                    files_list.append(file_dict)
+
+                files = files_list or None
+
         return MessageEndStreamResponse(
             task_id=self._application_generate_entity.task_id,
             id=self._message_id,
             metadata=metadata_dict,
+            files=files,
         )
 
     def _agent_message_to_stream_response(self, answer: str, message_id: str) -> AgentMessageStreamResponse:

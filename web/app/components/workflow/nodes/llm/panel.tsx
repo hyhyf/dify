@@ -1,30 +1,41 @@
 import type { FC } from 'react'
 import type { LLMNodeType } from './types'
 import type { NodePanelProps } from '@/app/components/workflow/types'
-import { RiAlertFill, RiQuestionLine } from '@remixicon/react'
+import { RiAlertFill, RiInformationLine, RiQuestionLine } from '@remixicon/react'
 import * as React from 'react'
-import { useCallback } from 'react'
+import { useCallback, useEffect } from 'react'
 import { useTranslation } from 'react-i18next'
 import AddButton2 from '@/app/components/base/button/add-button'
 import Switch from '@/app/components/base/switch'
-import Toast from '@/app/components/base/toast'
 import Tooltip from '@/app/components/base/tooltip'
+import { toast } from '@/app/components/base/ui/toast'
 import ModelParameterModal from '@/app/components/header/account-setting/model-provider-page/model-parameter-modal'
+import { FieldCollapse } from '@/app/components/workflow/nodes/_base/components/collapse'
 import Field from '@/app/components/workflow/nodes/_base/components/field'
 import OutputVars, { VarItem } from '@/app/components/workflow/nodes/_base/components/output-vars'
 import Editor from '@/app/components/workflow/nodes/_base/components/prompt/editor'
 import Split from '@/app/components/workflow/nodes/_base/components/split'
 import VarList from '@/app/components/workflow/nodes/_base/components/variable/var-list'
+import { useProviderContextSelector } from '@/context/provider-context'
 import { fetchAndMergeValidCompletionParams } from '@/utils/completion-params'
+import { extractPluginId } from '../../utils/plugin'
 import ConfigVision from '../_base/components/config-vision'
 import MemoryConfig from '../_base/components/memory-config'
 import VarReferencePicker from '../_base/components/variable/var-reference-picker'
+import ComputerUseConfig from './components/computer-use-config'
 import ConfigPrompt from './components/config-prompt'
 import ReasoningFormatConfig from './components/reasoning-format-config'
 import StructureOutput from './components/structure-output'
+import Tools from './components/tools'
+import MaxIterations from './components/tools/max-iterations'
+import { useNodeTools } from './components/tools/use-node-tools'
 import useConfig from './use-config'
+import { useNodeSkills } from './use-node-skills'
+import { useStructuredOutputMutualExclusion } from './use-structured-output-mutual-exclusion'
+import { getLLMModelIssue, LLMModelIssueCode } from './utils'
 
 const i18nPrefix = 'nodes.llm'
+const SKILL_DEPENDENCY_DEBOUNCE_MS = 800
 
 const Panel: FC<NodePanelProps<LLMNodeType>> = ({
   id,
@@ -58,15 +69,87 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
     handleVisionResolutionEnabledChange,
     handleVisionResolutionChange,
     isModelSupportStructuredOutput,
+    isModelSupportToolCall,
     structuredOutputCollapsed,
     setStructuredOutputCollapsed,
     handleStructureOutputEnableChange,
     handleStructureOutputChange,
     filterJinja2InputVar,
     handleReasoningFormatChange,
+    isSupportSandbox,
+    handleComputerUseChange,
   } = useConfig(id, data)
 
+  const promptTemplateKey = React.useMemo(() => {
+    try {
+      return JSON.stringify(inputs.prompt_template ?? null)
+    }
+    catch {
+      return ''
+    }
+  }, [inputs.prompt_template])
+  const [skillsRefreshKey, setSkillsRefreshKey] = React.useState(promptTemplateKey)
+  useEffect(() => {
+    if (skillsRefreshKey === promptTemplateKey)
+      return
+
+    const timerId = window.setTimeout(() => {
+      setSkillsRefreshKey(promptTemplateKey)
+    }, SKILL_DEPENDENCY_DEBOUNCE_MS)
+
+    return () => {
+      window.clearTimeout(timerId)
+    }
+  }, [promptTemplateKey, skillsRefreshKey])
+
+  const handlePromptEditorBlur = useCallback(() => {
+    setSkillsRefreshKey(promptTemplateKey)
+  }, [promptTemplateKey])
+
+  const {
+    toolDependencies,
+    isLoading: isNodeSkillsLoading,
+    isQueryEnabled: isNodeSkillsQueryEnabled,
+    hasData: hasNodeSkillsData,
+  } = useNodeSkills({
+    nodeId: id,
+    promptTemplateKey: skillsRefreshKey,
+    enabled: isSupportSandbox,
+  })
+
+  const {
+    isStructuredOutputBlocked,
+    isComputerUseBlocked,
+    isToolsBlocked,
+    disableToolBlocks,
+    shouldEnableComputerUseForPromptTools,
+    structuredOutputDisabledTip,
+    computerUseDisabledTip,
+    toolsDisabledTip,
+  } = useStructuredOutputMutualExclusion({
+    inputs,
+    readOnly,
+    isSupportSandbox,
+    toolDependencies,
+  })
+
+  const {
+    handleMaxIterationsChange,
+  } = useNodeTools(id)
+
   const model = inputs.model
+  const isModelProviderInstalled = useProviderContextSelector((state) => {
+    const modelIssue = getLLMModelIssue({ modelProvider: model?.provider })
+    if (modelIssue === LLMModelIssueCode.providerRequired)
+      return true
+
+    const modelProviderPluginId = extractPluginId(model.provider)
+    return state.modelProviders.some(provider => extractPluginId(provider.provider) === modelProviderPluginId)
+  })
+  const hasModelWarning = getLLMModelIssue({
+    modelProvider: model?.provider,
+    isModelProviderInstalled,
+  }) !== null
 
   const handleModelChange = useCallback((model: {
     provider: string
@@ -83,24 +166,26 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
         )
         const keys = Object.keys(removedDetails)
         if (keys.length)
-          Toast.notify({ type: 'warning', message: `${t('modelProvider.parametersInvalidRemoved', { ns: 'common' })}: ${keys.map(k => `${k} (${removedDetails[k]})`).join(', ')}` })
+          toast.warning(`${t('modelProvider.parametersInvalidRemoved', { ns: 'common' })}: ${keys.map(k => `${k} (${removedDetails[k]})`).join(', ')}`)
         handleCompletionParamsChange(filtered)
       }
       catch {
-        Toast.notify({ type: 'error', message: t('error', { ns: 'common' }) })
+        toast.error(t('error', { ns: 'common' }))
         handleCompletionParamsChange({})
       }
       finally {
         handleModelChanged(model)
       }
     })()
-  }, [inputs.model.completion_params])
+  }, [handleCompletionParamsChange, handleModelChanged, inputs.model.completion_params, t])
+
   return (
     <div className="mt-2">
-      <div className="space-y-4 px-4 pb-4">
+      <div className="space-y-4 px-4 pb-0">
         <Field
           title={t(`${i18nPrefix}.model`, { ns: 'workflow' })}
           required
+          warningDot={hasModelWarning}
         >
           <ModelParameterModal
             popupClassName="!w-[387px]"
@@ -114,27 +199,9 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
             hideDebugWithMultipleModel
             debugWithMultipleModel={false}
             readonly={readOnly}
+            nodesOutputVars={availableVars}
+            availableNodes={availableNodesWithParent}
           />
-        </Field>
-
-        {/* knowledge */}
-        <Field
-          title={t(`${i18nPrefix}.context`, { ns: 'workflow' })}
-          tooltip={t(`${i18nPrefix}.contextTooltip`, { ns: 'workflow' })!}
-        >
-          <>
-            <VarReferencePicker
-              readonly={readOnly}
-              nodeId={id}
-              isShowNodeName
-              value={inputs.context?.variable_selector || []}
-              onChange={handleContextVarChange}
-              filterVar={filterVar}
-            />
-            {shouldShowContextTip && (
-              <div className="text-xs font-normal leading-[18px] text-[#DC6803]">{t(`${i18nPrefix}.notSetContextInPromptTip`, { ns: 'workflow' })}</div>
-            )}
-          </>
         </Field>
 
         {/* Prompt */}
@@ -152,6 +219,10 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
             varList={inputs.prompt_config?.jinja2_variables || []}
             handleAddVariable={handleAddVariable}
             modelConfig={model}
+            onPromptEditorBlur={handlePromptEditorBlur}
+            disableToolBlocks={disableToolBlocks}
+            showComputerUseTip={shouldEnableComputerUseForPromptTools}
+            onEnableComputerUse={() => handleComputerUseChange(true)}
           />
         )}
 
@@ -190,6 +261,8 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
             {/* Readonly User Query */}
             <div className="mt-4">
               <Editor
+                instanceId={`${id}-memory-query-prompt-editor`}
+                nodeId={id}
                 title={(
                   <div className="flex items-center space-x-1">
                     <div className="text-xs font-semibold uppercase text-text-secondary">user</div>
@@ -211,6 +284,7 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
                 nodesOutputVars={availableVars}
                 availableNodes={availableNodesWithParent}
                 isSupportFileVar
+                isSupportSandbox={isSupportSandbox}
               />
 
               {inputs.memory.query_prompt_template && !inputs.memory.query_prompt_template.includes('{{#sys.query#}}') && (
@@ -233,25 +307,89 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
           </>
         )}
 
-        {/* Vision: GPT4-vision and so on */}
-        <ConfigVision
-          nodeId={id}
-          readOnly={readOnly}
-          isVisionModel={isVisionModel}
-          enabled={inputs.vision?.enabled}
-          onEnabledChange={handleVisionResolutionEnabledChange}
-          config={inputs.vision?.configs}
-          onConfigChange={handleVisionResolutionChange}
-        />
-
-        {/* Reasoning Format */}
-        <ReasoningFormatConfig
-          // Default to tagged for backward compatibility
-          value={inputs.reasoning_format || 'tagged'}
-          onChange={handleReasoningFormatChange}
-          readonly={readOnly}
-        />
+        {/* Sandbox Config */}
+        {isSupportSandbox && (
+          <>
+            <ComputerUseConfig
+              readonly={readOnly}
+              isDisabledByStructuredOutput={isComputerUseBlocked}
+              disabledTip={computerUseDisabledTip}
+              enabled={!!inputs.computer_use}
+              onChange={handleComputerUseChange}
+              nodeId={id}
+              toolSettings={inputs.tool_settings}
+              toolDependencies={toolDependencies}
+              isNodeSkillsLoading={isNodeSkillsLoading}
+              isNodeSkillsQueryEnabled={isNodeSkillsQueryEnabled}
+              hasNodeSkillsData={hasNodeSkillsData}
+            />
+          </>
+        )}
+        {!isSupportSandbox && (
+          <Tools
+            nodeId={id}
+            tools={inputs.tools}
+            maxIterations={inputs.max_iterations}
+            hideMaxIterations
+            disabled={isToolsBlocked || !isModelSupportToolCall}
+            disabledTip={toolsDisabledTip}
+          />
+        )}
       </div>
+
+      {/* Advanced Settings */}
+      <FieldCollapse title={t(`${i18nPrefix}.advancedSettings`, { ns: 'workflow' })}>
+        <div className="space-y-4">
+          {/* Context */}
+          <Field
+            title={t(`${i18nPrefix}.context`, { ns: 'workflow' })}
+            tooltip={t(`${i18nPrefix}.contextTooltip`, { ns: 'workflow' })!}
+          >
+            <>
+              <VarReferencePicker
+                readonly={readOnly}
+                nodeId={id}
+                isShowNodeName
+                value={inputs.context?.variable_selector || []}
+                onChange={handleContextVarChange}
+                filterVar={filterVar}
+              />
+              {shouldShowContextTip && (
+                <div className="text-xs font-normal leading-[18px] text-[#DC6803]">{t(`${i18nPrefix}.notSetContextInPromptTip`, { ns: 'workflow' })}</div>
+              )}
+            </>
+          </Field>
+
+          {/* Vision: GPT4-vision and so on */}
+          <ConfigVision
+            nodeId={id}
+            readOnly={readOnly}
+            isVisionModel={isVisionModel}
+            enabled={inputs.vision?.enabled}
+            onEnabledChange={handleVisionResolutionEnabledChange}
+            config={inputs.vision?.configs}
+            onConfigChange={handleVisionResolutionChange}
+          />
+
+          {/* Max Iterations */}
+          <MaxIterations
+            className="flex h-10 items-center"
+            value={inputs.max_iterations}
+            onChange={handleMaxIterationsChange}
+            disabled={!isModelSupportToolCall}
+          />
+
+          {/* Reasoning Format */}
+          {!isSupportSandbox && (
+            <ReasoningFormatConfig
+              value={inputs.reasoning_format || 'tagged'}
+              onChange={handleReasoningFormatChange}
+              readonly={readOnly}
+            />
+          )}
+        </div>
+      </FieldCollapse>
+
       <Split />
       <OutputVars
         collapsed={structuredOutputCollapsed}
@@ -259,21 +397,39 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
         operations={(
           <div className="mr-4 flex shrink-0 items-center">
             {(!isModelSupportStructuredOutput && !!inputs.structured_output_enabled) && (
-              <Tooltip
-                noDecoration
-                popupContent={(
-                  <div className="w-[232px] rounded-xl border-[0.5px] border-components-panel-border bg-components-tooltip-bg px-4 py-3.5 shadow-lg backdrop-blur-[5px]">
-                    <div className="title-xs-semi-bold text-text-primary">{t('structOutput.modelNotSupported', { ns: 'app' })}</div>
-                    <div className="body-xs-regular mt-1 text-text-secondary">{t('structOutput.modelNotSupportedTip', { ns: 'app' })}</div>
-                  </div>
-                )}
-              >
-                <div>
-                  <RiAlertFill className="mr-1 size-4 text-text-warning-secondary" />
-                </div>
-              </Tooltip>
+              isModelSupportToolCall
+                ? (
+                    <Tooltip
+                      noDecoration
+                      popupContent={(
+                        <div className="w-[232px] rounded-xl border-[0.5px] border-components-panel-border bg-components-tooltip-bg px-4 py-3.5 shadow-lg backdrop-blur-[5px]">
+                          <div className="text-text-primary title-xs-semi-bold">{t('structOutput.toolCallFallback', { ns: 'app' })}</div>
+                          <div className="mt-1 text-text-secondary body-xs-regular">{t('structOutput.toolCallFallbackTip', { ns: 'app' })}</div>
+                        </div>
+                      )}
+                    >
+                      <div>
+                        <RiInformationLine className="mr-1 size-4 text-text-tertiary" />
+                      </div>
+                    </Tooltip>
+                  )
+                : (
+                    <Tooltip
+                      noDecoration
+                      popupContent={(
+                        <div className="w-[232px] rounded-xl border-[0.5px] border-components-panel-border bg-components-tooltip-bg px-4 py-3.5 shadow-lg backdrop-blur-[5px]">
+                          <div className="text-text-primary title-xs-semi-bold">{t('structOutput.modelNotSupported', { ns: 'app' })}</div>
+                          <div className="mt-1 text-text-secondary body-xs-regular">{t('structOutput.modelNotSupportedTip', { ns: 'app' })}</div>
+                        </div>
+                      )}
+                    >
+                      <div>
+                        <RiAlertFill className="mr-1 size-4 text-text-warning-secondary" />
+                      </div>
+                    </Tooltip>
+                  )
             )}
-            <div className="system-xs-medium-uppercase mr-0.5 text-text-tertiary">{t('structOutput.structured', { ns: 'app' })}</div>
+            <div className="mr-0.5 text-text-tertiary system-xs-medium-uppercase">{t('structOutput.structured', { ns: 'app' })}</div>
             <Tooltip popupContent={
               <div className="max-w-[150px]">{t('structOutput.structuredTip', { ns: 'app' })}</div>
             }
@@ -282,31 +438,72 @@ const Panel: FC<NodePanelProps<LLMNodeType>> = ({
                 <RiQuestionLine className="size-3.5 text-text-quaternary" />
               </div>
             </Tooltip>
-            <Switch
-              className="ml-2"
-              defaultValue={!!inputs.structured_output_enabled}
-              onChange={handleStructureOutputEnableChange}
-              size="md"
-              disabled={readOnly}
-            />
+            <Tooltip
+              disabled={!structuredOutputDisabledTip}
+              popupContent={structuredOutputDisabledTip}
+            >
+              <div className="ml-2">
+                <Switch
+                  value={!!inputs.structured_output_enabled}
+                  onChange={handleStructureOutputEnableChange}
+                  size="md"
+                  disabled={isStructuredOutputBlocked}
+                />
+              </div>
+            </Tooltip>
           </div>
         )}
       >
         <>
           <VarItem
-            name="text"
-            type="string"
-            description={t(`${i18nPrefix}.outputVars.output`, { ns: 'workflow' })}
+            name="generation"
+            type="object"
+            description={t(`${i18nPrefix}.outputVars.generation`, { ns: 'workflow' })}
+            subItems={[
+              {
+                name: 'content',
+                type: 'string',
+                description: '',
+              },
+              {
+                name: 'reasoning_content',
+                type: 'array[string]',
+                description: '',
+              },
+              {
+                name: 'tool_calls',
+                type: 'array[object]',
+                description: '',
+              },
+            ]}
           />
-          <VarItem
-            name="reasoning_content"
-            type="string"
-            description={t(`${i18nPrefix}.outputVars.reasoning_content`, { ns: 'workflow' })}
-          />
+          {
+            !isSupportSandbox && (
+              <VarItem
+                name="text"
+                type="string"
+                description={t(`${i18nPrefix}.outputVars.output`, { ns: 'workflow' })}
+              />
+            )
+          }
+          {
+            !isSupportSandbox && (
+              <VarItem
+                name="reasoning_content"
+                type="string"
+                description={t(`${i18nPrefix}.outputVars.reasoning_content`, { ns: 'workflow' })}
+              />
+            )
+          }
           <VarItem
             name="usage"
             type="object"
             description={t(`${i18nPrefix}.outputVars.usage`, { ns: 'workflow' })}
+          />
+          <VarItem
+            name="files"
+            type="array[file]"
+            description={t(`${i18nPrefix}.outputVars.files`, { ns: 'workflow' })}
           />
           {inputs.structured_output_enabled && (
             <>

@@ -13,9 +13,12 @@ from core.app.apps.common.workflow_response_converter import WorkflowResponseCon
 from core.app.entities.app_invoke_entities import InvokeFrom, WorkflowAppGenerateEntity
 from core.app.entities.queue_entities import (
     AppQueueEvent,
+    ChunkType,
     MessageQueueMessage,
     QueueAgentLogEvent,
     QueueErrorEvent,
+    QueueHumanInputFormFilledEvent,
+    QueueHumanInputFormTimeoutEvent,
     QueueIterationCompletedEvent,
     QueueIterationNextEvent,
     QueueIterationStartEvent,
@@ -32,6 +35,7 @@ from core.app.entities.queue_entities import (
     QueueTextChunkEvent,
     QueueWorkflowFailedEvent,
     QueueWorkflowPartialSuccessEvent,
+    QueueWorkflowPausedEvent,
     QueueWorkflowStartedEvent,
     QueueWorkflowSucceededEvent,
     WorkflowQueueMessage,
@@ -46,15 +50,17 @@ from core.app.entities.task_entities import (
     WorkflowAppBlockingResponse,
     WorkflowAppStreamResponse,
     WorkflowFinishStreamResponse,
+    WorkflowPauseStreamResponse,
     WorkflowStartStreamResponse,
 )
 from core.app.task_pipeline.based_generate_task_pipeline import BasedGenerateTaskPipeline
 from core.base.tts import AppGeneratorTTSPublisher, AudioTrunk
 from core.ops.ops_trace_manager import TraceQueueManager
-from core.workflow.enums import WorkflowExecutionStatus
-from core.workflow.repositories.draft_variable_repository import DraftVariableSaverFactory
-from core.workflow.runtime import GraphRuntimeState
-from core.workflow.system_variable import SystemVariable
+from dify_graph.entities.workflow_start_reason import WorkflowStartReason
+from dify_graph.enums import WorkflowExecutionStatus
+from dify_graph.repositories.draft_variable_repository import DraftVariableSaverFactory
+from dify_graph.runtime import GraphRuntimeState
+from dify_graph.system_variable import SystemVariable
 from extensions.ext_database import db
 from models import Account
 from models.enums import CreatorUserRole
@@ -132,6 +138,25 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         for stream_response in generator:
             if isinstance(stream_response, ErrorStreamResponse):
                 raise stream_response.err
+            elif isinstance(stream_response, WorkflowPauseStreamResponse):
+                response = WorkflowAppBlockingResponse(
+                    task_id=self._application_generate_entity.task_id,
+                    workflow_run_id=stream_response.data.workflow_run_id,
+                    data=WorkflowAppBlockingResponse.Data(
+                        id=stream_response.data.workflow_run_id,
+                        workflow_id=self._workflow.id,
+                        status=stream_response.data.status,
+                        outputs=stream_response.data.outputs or {},
+                        error=None,
+                        elapsed_time=stream_response.data.elapsed_time,
+                        total_tokens=stream_response.data.total_tokens,
+                        total_steps=stream_response.data.total_steps,
+                        created_at=stream_response.data.created_at,
+                        finished_at=None,
+                    ),
+                )
+
+                return response
             elif isinstance(stream_response, WorkflowFinishStreamResponse):
                 response = WorkflowAppBlockingResponse(
                     task_id=self._application_generate_entity.task_id,
@@ -146,7 +171,7 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
                         total_tokens=stream_response.data.total_tokens,
                         total_steps=stream_response.data.total_steps,
                         created_at=int(stream_response.data.created_at),
-                        finished_at=int(stream_response.data.finished_at),
+                        finished_at=int(stream_response.data.finished_at) if stream_response.data.finished_at else None,
                     ),
                 )
 
@@ -259,13 +284,15 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         run_id = self._extract_workflow_run_id(runtime_state)
         self._workflow_execution_id = run_id
 
-        with self._database_session() as session:
-            self._save_workflow_app_log(session=session, workflow_run_id=self._workflow_execution_id)
+        if event.reason == WorkflowStartReason.INITIAL:
+            with self._database_session() as session:
+                self._save_workflow_app_log(session=session, workflow_run_id=self._workflow_execution_id)
 
         start_resp = self._workflow_response_converter.workflow_start_to_stream_response(
             task_id=self._application_generate_entity.task_id,
             workflow_run_id=run_id,
             workflow_id=self._workflow.id,
+            reason=event.reason,
         )
         yield start_resp
 
@@ -440,6 +467,21 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         )
         yield workflow_finish_resp
 
+    def _handle_workflow_paused_event(
+        self,
+        event: QueueWorkflowPausedEvent,
+        **kwargs,
+    ) -> Generator[StreamResponse, None, None]:
+        """Handle workflow paused events."""
+        self._ensure_workflow_initialized()
+        validated_state = self._ensure_graph_runtime_initialized()
+        responses = self._workflow_response_converter.workflow_pause_to_stream_response(
+            event=event,
+            task_id=self._application_generate_entity.task_id,
+            graph_runtime_state=validated_state,
+        )
+        yield from responses
+
     def _handle_workflow_failed_and_stop_events(
         self,
         event: Union[QueueWorkflowFailedEvent, QueueStopEvent],
@@ -483,16 +525,61 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         if delta_text is None:
             return
 
+        tool_call = event.tool_call
+        tool_result = event.tool_result
+        tool_payload = tool_call or tool_result
+        tool_call_id = tool_payload.id if tool_payload and tool_payload.id else None
+        tool_name = tool_payload.name if tool_payload and tool_payload.name else None
+        tool_arguments = tool_call.arguments if tool_call else None
+        tool_elapsed_time = tool_result.elapsed_time if tool_result else None
+        tool_files = tool_result.files if tool_result else []
+        tool_icon = tool_payload.icon if tool_payload else None
+        tool_icon_dark = tool_payload.icon_dark if tool_payload else None
+
         # only publish tts message at text chunk streaming
         if tts_publisher and queue_message:
             tts_publisher.publish(queue_message)
 
-        yield self._text_chunk_to_stream_response(delta_text, from_variable_selector=event.from_variable_selector)
+        yield self._text_chunk_to_stream_response(
+            text=delta_text,
+            from_variable_selector=event.from_variable_selector,
+            chunk_type=event.chunk_type,
+            tool_call_id=tool_call_id,
+            tool_name=tool_name,
+            tool_arguments=tool_arguments,
+            tool_files=tool_files,
+            tool_elapsed_time=tool_elapsed_time,
+            tool_icon=tool_icon,
+            tool_icon_dark=tool_icon_dark,
+            node_id=event.node_id,
+            model_provider=event.model_provider,
+            model_name=event.model_name,
+            model_icon=event.model_icon,
+            model_icon_dark=event.model_icon_dark,
+            model_usage=event.model_usage,
+            model_duration=event.model_duration,
+        )
 
     def _handle_agent_log_event(self, event: QueueAgentLogEvent, **kwargs) -> Generator[StreamResponse, None, None]:
         """Handle agent log events."""
         yield self._workflow_response_converter.handle_agent_log(
             task_id=self._application_generate_entity.task_id, event=event
+        )
+
+    def _handle_human_input_form_filled_event(
+        self, event: QueueHumanInputFormFilledEvent, **kwargs
+    ) -> Generator[StreamResponse, None, None]:
+        """Handle human input form filled events."""
+        yield self._workflow_response_converter.human_input_form_filled_to_stream_response(
+            event=event, task_id=self._application_generate_entity.task_id
+        )
+
+    def _handle_human_input_form_timeout_event(
+        self, event: QueueHumanInputFormTimeoutEvent, **kwargs
+    ) -> Generator[StreamResponse, None, None]:
+        """Handle human input form timeout events."""
+        yield self._workflow_response_converter.human_input_form_timeout_to_stream_response(
+            event=event, task_id=self._application_generate_entity.task_id
         )
 
     def _get_event_handlers(self) -> dict[type, Callable]:
@@ -506,6 +593,7 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             QueueWorkflowStartedEvent: self._handle_workflow_started_event,
             QueueWorkflowSucceededEvent: self._handle_workflow_succeeded_event,
             QueueWorkflowPartialSuccessEvent: self._handle_workflow_partial_success_event,
+            QueueWorkflowPausedEvent: self._handle_workflow_paused_event,
             # Node events
             QueueNodeRetryEvent: self._handle_node_retry_event,
             QueueNodeStartedEvent: self._handle_node_started_event,
@@ -520,6 +608,8 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             QueueLoopCompletedEvent: self._handle_loop_completed_event,
             # Agent events
             QueueAgentLogEvent: self._handle_agent_log_event,
+            QueueHumanInputFormFilledEvent: self._handle_human_input_form_filled_event,
+            QueueHumanInputFormTimeoutEvent: self._handle_human_input_form_timeout_event,
         }
 
     def _dispatch_event(
@@ -602,6 +692,9 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
                 case QueueWorkflowFailedEvent():
                     yield from self._handle_workflow_failed_and_stop_events(event)
                     break
+                case QueueWorkflowPausedEvent():
+                    yield from self._handle_workflow_paused_event(event)
+                    break
 
                 case QueueStopEvent():
                     yield from self._handle_workflow_failed_and_stop_events(event)
@@ -642,7 +735,7 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
             app_id=self._application_generate_entity.app_config.app_id,
             workflow_id=self._workflow.id,
             workflow_run_id=workflow_run_id,
-            created_from=created_from.value,
+            created_from=created_from,
             created_by_role=self._created_by_role,
             created_by=self._user_id,
         )
@@ -650,16 +743,80 @@ class WorkflowAppGenerateTaskPipeline(GraphRuntimeStateSupport):
         session.add(workflow_app_log)
 
     def _text_chunk_to_stream_response(
-        self, text: str, from_variable_selector: list[str] | None = None
+        self,
+        text: str,
+        from_variable_selector: list[str] | None = None,
+        chunk_type: ChunkType | None = None,
+        tool_call_id: str | None = None,
+        tool_name: str | None = None,
+        tool_arguments: str | None = None,
+        tool_files: list[str] | None = None,
+        tool_error: str | None = None,
+        tool_elapsed_time: float | None = None,
+        tool_icon: str | dict | None = None,
+        tool_icon_dark: str | dict | None = None,
+        node_id: str | None = None,
+        model_provider: str | None = None,
+        model_name: str | None = None,
+        model_icon: str | dict | None = None,
+        model_icon_dark: str | dict | None = None,
+        model_usage: dict | None = None,
+        model_duration: float | None = None,
     ) -> TextChunkStreamResponse:
-        """
-        Handle completed event.
-        :param text: text
-        :return:
-        """
+        from core.app.entities.task_entities import ChunkType as ResponseChunkType
+
+        response_chunk_type = ResponseChunkType(chunk_type.value) if chunk_type else ResponseChunkType.TEXT
+
+        data = TextChunkStreamResponse.Data(
+            text=text,
+            from_variable_selector=from_variable_selector,
+            chunk_type=response_chunk_type,
+            node_id=node_id,
+        )
+
+        if response_chunk_type == ResponseChunkType.TOOL_CALL:
+            data = data.model_copy(
+                update={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "tool_arguments": tool_arguments,
+                    "tool_icon": tool_icon,
+                    "tool_icon_dark": tool_icon_dark,
+                }
+            )
+        elif response_chunk_type == ResponseChunkType.TOOL_RESULT:
+            data = data.model_copy(
+                update={
+                    "tool_call_id": tool_call_id,
+                    "tool_name": tool_name,
+                    "tool_arguments": tool_arguments,
+                    "tool_files": tool_files,
+                    "tool_error": tool_error,
+                    "tool_elapsed_time": tool_elapsed_time,
+                    "tool_icon": tool_icon,
+                    "tool_icon_dark": tool_icon_dark,
+                }
+            )
+        elif response_chunk_type == ResponseChunkType.MODEL_START:
+            data = data.model_copy(
+                update={
+                    "model_provider": model_provider,
+                    "model_name": model_name,
+                    "model_icon": model_icon,
+                    "model_icon_dark": model_icon_dark,
+                }
+            )
+        elif response_chunk_type == ResponseChunkType.MODEL_END:
+            data = data.model_copy(
+                update={
+                    "model_usage": model_usage,
+                    "model_duration": model_duration,
+                }
+            )
+
         response = TextChunkStreamResponse(
             task_id=self._application_generate_entity.task_id,
-            data=TextChunkStreamResponse.Data(text=text, from_variable_selector=from_variable_selector),
+            data=data,
         )
 
         return response

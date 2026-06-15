@@ -9,7 +9,7 @@ import AppIconPicker from '@/app/components/base/app-icon-picker'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
 import Textarea from '@/app/components/base/textarea'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { useInvalidCustomizedTemplateList, useUpdateTemplateInfo } from '@/service/use-pipeline'
 
 type EditPipelineInfoProps = {
@@ -67,10 +67,7 @@ const EditPipelineInfo = ({
 
   const handleSave = useCallback(async () => {
     if (!name) {
-      Toast.notify({
-        type: 'error',
-        message: 'Please enter a name for the Knowledge Base.',
-      })
+      toast.error(t('editPipelineInfoNameRequired', { ns: 'datasetPipeline' }))
       return
     }
     const request = {
@@ -96,7 +93,7 @@ const EditPipelineInfo = ({
     <div className="relative flex flex-col">
       {/* Header */}
       <div className="pb-3 pl-6 pr-14 pt-6">
-        <span className="title-2xl-semi-bold text-text-primary">
+        <span className="text-text-primary title-2xl-semi-bold">
           {t('editPipelineInfo', { ns: 'datasetPipeline' })}
         </span>
       </div>
@@ -111,7 +108,7 @@ const EditPipelineInfo = ({
       <div className="flex flex-col gap-y-5 px-6 py-3">
         <div className="flex items-end gap-x-3 self-stretch">
           <div className="flex grow flex-col gap-y-1 pb-1">
-            <label className="system-sm-medium flex h-6 items-center text-text-secondary">
+            <label className="flex h-6 items-center text-text-secondary system-sm-medium">
               {t('pipelineNameAndIcon', { ns: 'datasetPipeline' })}
             </label>
             <Input
@@ -132,7 +129,7 @@ const EditPipelineInfo = ({
           />
         </div>
         <div className="flex flex-col gap-y-1">
-          <label className="system-sm-medium flex h-6 items-center text-text-secondary">
+          <label className="flex h-6 items-center text-text-secondary system-sm-medium">
             {t('knowledgeDescription', { ns: 'datasetPipeline' })}
           </label>
           <Textarea

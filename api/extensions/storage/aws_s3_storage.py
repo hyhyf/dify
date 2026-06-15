@@ -2,7 +2,7 @@ import logging
 from collections.abc import Generator
 
 import boto3
-from botocore.client import Config
+from botocore.client import BaseClient, Config
 from botocore.exceptions import ClientError
 
 from configs import dify_config
@@ -10,19 +10,45 @@ from extensions.storage.base_storage import BaseStorage
 
 logger = logging.getLogger(__name__)
 
+# Boto3's default retry mode (legacy) performs up to 5 retries with exponential
+# backoff, which can cause 30+ second delays when MinIO returns responses that
+# trigger urllib3 HeaderParsingError on reused connections. Disabling retries
+# prevents the delay; transient failures are handled by the storage callers.
+S3_DISABLE_RETRIES: dict = {"max_attempts": 1}
+
 
 class AwsS3Storage(BaseStorage):
     """Implementation for Amazon Web Services S3 storage."""
 
+    client: BaseClient
+
     def __init__(self):
         super().__init__()
         self.bucket_name = dify_config.S3_BUCKET_NAME
+
+        # NOTE:
+        # Some S3-compatible providers (e.g. MinIO) are strict about presigned request
+        # signature calculation. If the client sends a `Content-Type` header while the
+        # server generates a SigV2 presigned URL (or otherwise signs an empty Content-Type),
+        # the request may be rejected with 403 (signature mismatch).
+        #
+        # Enforce SigV4 for presigned URLs to avoid accidental SigV2 fallback and to keep
+        # header signing behavior consistent across providers.
+        s3_client_config = Config(
+            signature_version="s3v4",
+            s3={"addressing_style": dify_config.S3_ADDRESS_STYLE},
+            retries=S3_DISABLE_RETRIES,
+        )
         if dify_config.S3_USE_AWS_MANAGED_IAM:
             logger.info("Using AWS managed IAM role for S3")
 
             session = boto3.Session()
             region_name = dify_config.S3_REGION
-            self.client = session.client(service_name="s3", region_name=region_name)
+            self.client = session.client(
+                service_name="s3",
+                region_name=region_name,
+                config=s3_client_config,
+            )
         else:
             logger.info("Using ak and sk for S3")
 
@@ -32,21 +58,9 @@ class AwsS3Storage(BaseStorage):
                 aws_access_key_id=dify_config.S3_ACCESS_KEY,
                 endpoint_url=dify_config.S3_ENDPOINT,
                 region_name=dify_config.S3_REGION,
-                config=Config(s3={"addressing_style": dify_config.S3_ADDRESS_STYLE}),
+                config=s3_client_config,
             )
-        # create bucket
-        try:
-            self.client.head_bucket(Bucket=self.bucket_name)
-        except ClientError as e:
-            # if bucket not exists, create it
-            if e.response.get("Error", {}).get("Code") == "404":
-                self.client.create_bucket(Bucket=self.bucket_name)
-            # if bucket is not accessible, pass, maybe the bucket is existing but not accessible
-            elif e.response.get("Error", {}).get("Code") == "403":
-                pass
-            else:
-                # other error, raise exception
-                raise
+        logger.info("S3 client initialized, bucket: %s", self.bucket_name)
 
     def save(self, filename, data):
         self.client.put_object(Bucket=self.bucket_name, Key=filename, Body=data)
@@ -83,5 +97,26 @@ class AwsS3Storage(BaseStorage):
         except:
             return False
 
-    def delete(self, filename):
+    def delete(self, filename: str):
         self.client.delete_object(Bucket=self.bucket_name, Key=filename)
+
+    def get_download_url(
+        self,
+        filename: str,
+        expires_in: int = 3600,
+        *,
+        download_filename: str | None = None,
+    ) -> str:
+        raise NotImplementedError
+
+    def get_download_urls(
+        self,
+        filenames: list[str],
+        expires_in: int = 3600,
+        *,
+        download_filenames: list[str] | None = None,
+    ) -> list[str]:
+        raise NotImplementedError
+
+    def get_upload_url(self, filename: str, expires_in: int = 3600) -> str:
+        raise NotImplementedError

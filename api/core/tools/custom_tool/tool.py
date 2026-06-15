@@ -7,13 +7,13 @@ from urllib.parse import urlencode
 
 import httpx
 
-from core.file.file_manager import download
 from core.helper import ssrf_proxy
 from core.tools.__base.tool import Tool
 from core.tools.__base.tool_runtime import ToolRuntime
 from core.tools.entities.tool_bundle import ApiToolBundle
 from core.tools.entities.tool_entities import ToolEntity, ToolInvokeMessage, ToolProviderType
 from core.tools.errors import ToolInvokeError, ToolParameterValidationError, ToolProviderCredentialValidationError
+from dify_graph.file.file_manager import download
 
 API_TOOL_DEFAULT_TIMEOUT = (
     int(getenv("API_TOOL_DEFAULT_CONNECT_TIMEOUT", "10")),
@@ -356,7 +356,22 @@ class ApiTool(Tool):
                 elif property["type"] == "null":
                     if value is None:
                         return None
-                elif property["type"] == "object" or property["type"] == "array":
+                elif property["type"] == "object":
+                    if isinstance(value, str):
+                        try:
+                            value = json.loads(value)
+                        except ValueError:
+                            return value
+                    if isinstance(value, dict) and "properties" in property:
+                        result = {}
+                        for nested_name, nested_prop in property["properties"].items():
+                            if nested_name in value:
+                                result[nested_name] = self._convert_body_property_type(
+                                    nested_prop, value[nested_name]
+                                )
+                        return result
+                    return value
+                elif property["type"] == "array":
                     if isinstance(value, str):
                         try:
                             return json.loads(value)

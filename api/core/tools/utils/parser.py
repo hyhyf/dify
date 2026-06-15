@@ -1,8 +1,9 @@
 import re
+from collections.abc import Mapping
 from json import dumps as json_dumps
 from json import loads as json_loads
 from json.decoder import JSONDecodeError
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
 from flask import request
@@ -14,10 +15,24 @@ from core.tools.entities.tool_entities import ApiProviderSchemaType, ToolParamet
 from core.tools.errors import ToolApiSchemaError, ToolNotSupportedError, ToolProviderNotFoundError
 
 
+class InterfaceDict(TypedDict):
+    path: str
+    method: str
+    operation: dict[str, Any]
+
+
+class OpenAPISpecDict(TypedDict):
+    openapi: str
+    info: dict[str, str]
+    servers: list[dict[str, Any]]
+    paths: dict[str, Any]
+    components: dict[str, Any]
+
+
 class ApiBasedToolSchemaParser:
     @staticmethod
     def parse_openapi_to_tool_bundle(
-        openapi: dict, extra_info: dict | None = None, warning: dict | None = None
+        openapi: Mapping[str, Any], extra_info: dict | None = None, warning: dict | None = None
     ) -> list[ApiToolBundle]:
         warning = warning if warning is not None else {}
         extra_info = extra_info if extra_info is not None else {}
@@ -35,7 +50,7 @@ class ApiBasedToolSchemaParser:
             server_url = matched_servers[0] if matched_servers else server_url
 
         # list all interfaces
-        interfaces = []
+        interfaces: list[InterfaceDict] = []
         for path, path_item in openapi["paths"].items():
             methods = ["get", "post", "put", "delete", "patch", "head", "options", "trace"]
             for method in methods:
@@ -87,6 +102,19 @@ class ApiBasedToolSchemaParser:
                     typ = ApiBasedToolSchemaParser._get_tool_parameter_type(parameter)
                     if typ:
                         tool_parameter.type = typ
+
+                    # preserve nested schema for object and array types
+                    # (strip 'default' to avoid leaking it into LLM-facing function schema)
+                    if tool_parameter.type in (
+                        ToolParameter.ToolParameterType.OBJECT,
+                        ToolParameter.ToolParameterType.ARRAY,
+                    ):
+                        schema = {
+                            k: v
+                            for k, v in parameter.get("schema", {}).items()
+                            if k != "default"
+                        }
+                        tool_parameter.input_schema = schema
 
                     parameters.append(tool_parameter)
             # create tool bundle
@@ -161,6 +189,17 @@ class ApiBasedToolSchemaParser:
                                 typ = ApiBasedToolSchemaParser._get_tool_parameter_type(property)
                                 if typ:
                                     tool.type = typ
+
+                                # preserve nested schema for object and array types
+                                if tool.type in (
+                                    ToolParameter.ToolParameterType.OBJECT,
+                                    ToolParameter.ToolParameterType.ARRAY,
+                                ):
+                                    tool.input_schema = {
+                                        k: v
+                                        for k, v in property.items()
+                                        if k != "default"
+                                    }
 
                                 parameters.append(tool)
 
@@ -245,6 +284,8 @@ class ApiBasedToolSchemaParser:
             else:
                 # For regular arrays, return ARRAY type instead of None
                 return ToolParameter.ToolParameterType.ARRAY
+        elif typ == "object":
+            return ToolParameter.ToolParameterType.OBJECT
         else:
             return None
 
@@ -271,7 +312,7 @@ class ApiBasedToolSchemaParser:
     @staticmethod
     def parse_swagger_to_openapi(
         swagger: dict, extra_info: dict | None = None, warning: dict | None = None
-    ) -> dict[str, Any]:
+    ) -> OpenAPISpecDict:
         warning = warning or {}
         """
         parse swagger to openapi
@@ -287,7 +328,7 @@ class ApiBasedToolSchemaParser:
         if len(servers) == 0:
             raise ToolApiSchemaError("No server found in the swagger yaml.")
 
-        converted_openapi: dict[str, Any] = {
+        converted_openapi: OpenAPISpecDict = {
             "openapi": "3.0.0",
             "info": {
                 "title": info.get("title", "Swagger"),

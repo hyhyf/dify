@@ -43,12 +43,12 @@ const ApiInput: FC<Props> = ({
   const { availableVars, availableNodesWithParent } = useAvailableVarList(nodeId, {
     onlyLeafNodeVar: false,
     filterVar: (varPayload: Var) => {
-      return [VarType.string, VarType.number, VarType.secret].includes(varPayload.type)
+      return ([VarType.string, VarType.number, VarType.secret] as VarType[]).includes(varPayload.type)
     },
   })
 
   return (
-    <div className="flex items-start  space-x-1">
+    <div className="flex items-start space-x-1">
       <Selector
         value={method}
         onChange={onMethodChange}

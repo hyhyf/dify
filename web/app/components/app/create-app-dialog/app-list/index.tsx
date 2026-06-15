@@ -4,21 +4,22 @@ import type { CreateAppModalProps } from '@/app/components/explore/create-app-mo
 import type { App } from '@/models/explore'
 import { RiRobot2Line } from '@remixicon/react'
 import { useDebounceFn } from 'ahooks'
-import { useRouter } from 'next/navigation'
 import * as React from 'react'
 import { useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import AppTypeSelector from '@/app/components/app/type-selector'
 import { trackEvent } from '@/app/components/base/amplitude'
+import { buttonVariants } from '@/app/components/base/button'
 import Divider from '@/app/components/base/divider'
 import Input from '@/app/components/base/input'
 import Loading from '@/app/components/base/loading'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import CreateAppModal from '@/app/components/explore/create-app-modal'
 import { usePluginDependencies } from '@/app/components/workflow/plugin-dependency/hooks'
-import { NEED_REFRESH_APP_LIST_KEY } from '@/config'
+import { MARKETPLACE_URL_PREFIX, NEED_REFRESH_APP_LIST_KEY } from '@/config'
 import { useAppContext } from '@/context/app-context'
 import { DSLImportMode } from '@/models/app'
+import { useRouter } from '@/next/navigation'
 import { importDSL } from '@/service/apps'
 import { fetchAppDetail } from '@/service/explore'
 import { useExploreAppList } from '@/service/use-explore'
@@ -32,6 +33,8 @@ type AppsProps = {
   onSuccess?: () => void
   onCreateFromBlank?: () => void
 }
+
+const marketplaceTemplatesUrl = `${MARKETPLACE_URL_PREFIX.replace(/\/$/, '')}/templates`
 
 // export enum PageType {
 //   EXPLORE = 'explore',
@@ -137,10 +140,7 @@ const Apps = ({
       })
 
       setIsShowCreateModal(false)
-      Toast.notify({
-        type: 'success',
-        message: t('newApp.appCreated', { ns: 'app' }),
-      })
+      toast.success(t('newApp.appCreated', { ns: 'app' }))
       if (onSuccess)
         onSuccess()
       if (app.app_id)
@@ -149,7 +149,7 @@ const Apps = ({
       getRedirection(isCurrentWorkspaceEditor, { id: app.app_id!, mode }, push)
     }
     catch {
-      Toast.notify({ type: 'error', message: t('newApp.appCreateFailed', { ns: 'app' }) })
+      toast.error(t('newApp.appCreateFailed', { ns: 'app' }))
     }
   }
 
@@ -165,7 +165,18 @@ const Apps = ({
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-divider-burn py-3">
         <div className="min-w-[180px] pl-5">
-          <span className="title-xl-semi-bold text-text-primary">{t('newApp.startFromTemplate', { ns: 'app' })}</span>
+          <span className="text-text-primary title-xl-semi-bold">{t('newApp.startFromTemplate', { ns: 'app' })}</span>
+          <a
+            href={marketplaceTemplatesUrl}
+            target="_blank"
+            rel="noopener noreferrer"
+            className={cn(
+              buttonVariants({ variant: 'primary', size: 'small' }),
+              'ml-2 align-middle',
+            )}
+          >
+            {t('newApp.exploreCommunity', { ns: 'app' })}
+          </a>
         </div>
         <div className="flex max-w-[548px] flex-1 items-center rounded-xl border border-components-panel-border bg-components-panel-bg-blur p-1.5 shadow-md">
           <AppTypeSelector value={currentType} onChange={setCurrentType} />
@@ -195,10 +206,10 @@ const Apps = ({
             <>
               <div className="pb-1 pt-4">
                 {searchKeywords
-                  ? <p className="title-md-semi-bold text-text-tertiary">{searchFilteredList.length > 1 ? t('newApp.foundResults', { ns: 'app', count: searchFilteredList.length }) : t('newApp.foundResult', { ns: 'app', count: searchFilteredList.length })}</p>
+                  ? <p className="text-text-tertiary title-md-semi-bold">{searchFilteredList.length > 1 ? t('newApp.foundResults', { ns: 'app', count: searchFilteredList.length }) : t('newApp.foundResult', { ns: 'app', count: searchFilteredList.length })}</p>
                   : (
                       <div className="flex h-[22px] items-center">
-                        <AppCategoryLabel category={currCategory as AppCategories} className="title-md-semi-bold text-text-primary" />
+                        <AppCategoryLabel category={currCategory as AppCategories} className="text-text-primary title-md-semi-bold" />
                       </div>
                     )}
               </div>
@@ -250,8 +261,8 @@ function NoTemplateFound() {
       <div className="mb-2 inline-flex h-8 w-8 items-center justify-center rounded-lg bg-components-card-bg shadow-lg">
         <RiRobot2Line className="h-5 w-5 text-text-tertiary" />
       </div>
-      <p className="title-md-semi-bold text-text-primary">{t('newApp.noTemplateFound', { ns: 'app' })}</p>
-      <p className="system-sm-regular text-text-tertiary">{t('newApp.noTemplateFoundTip', { ns: 'app' })}</p>
+      <p className="text-text-primary title-md-semi-bold">{t('newApp.noTemplateFound', { ns: 'app' })}</p>
+      <p className="text-text-tertiary system-sm-regular">{t('newApp.noTemplateFoundTip', { ns: 'app' })}</p>
     </div>
   )
 }

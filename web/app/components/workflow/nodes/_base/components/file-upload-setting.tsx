@@ -106,7 +106,7 @@ const FileUploadSetting: FC<Props> = ({
               [SupportUploadFileTypes.document, SupportUploadFileTypes.image, SupportUploadFileTypes.audio, SupportUploadFileTypes.video].map((type: SupportUploadFileTypes) => (
                 <FileTypeItem
                   key={type}
-                  type={type as SupportUploadFileTypes.image | SupportUploadFileTypes.document | SupportUploadFileTypes.audio | SupportUploadFileTypes.video}
+                  type={type as typeof SupportUploadFileTypes.image | typeof SupportUploadFileTypes.document | typeof SupportUploadFileTypes.audio | typeof SupportUploadFileTypes.video}
                   selected={allowed_file_types.includes(type)}
                   onToggle={handleSupportFileTypeChange}
                 />
@@ -150,7 +150,7 @@ const FileUploadSetting: FC<Props> = ({
           title={t('variableConfig.maxNumberOfUploads', { ns: 'appDebug' })!}
         >
           <div>
-            <div className="body-xs-regular mb-1.5 text-text-tertiary">
+            <div className="mb-1.5 text-text-tertiary body-xs-regular">
               {t('variableConfig.maxNumberTip', {
                 ns: 'appDebug',
                 imgLimit: formatFileSize(imgSizeLimit),
@@ -179,7 +179,7 @@ const FileUploadSetting: FC<Props> = ({
               [SupportUploadFileTypes.document, SupportUploadFileTypes.image, SupportUploadFileTypes.audio, SupportUploadFileTypes.video].map((type: SupportUploadFileTypes) => (
                 <FileTypeItem
                   key={type}
-                  type={type as SupportUploadFileTypes.image | SupportUploadFileTypes.document | SupportUploadFileTypes.audio | SupportUploadFileTypes.video}
+                  type={type as typeof SupportUploadFileTypes.image | typeof SupportUploadFileTypes.document | typeof SupportUploadFileTypes.audio | typeof SupportUploadFileTypes.video}
                   selected={allowed_file_types.includes(type)}
                   onToggle={handleSupportFileTypeChange}
                 />

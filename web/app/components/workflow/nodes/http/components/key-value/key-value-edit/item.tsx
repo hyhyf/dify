@@ -58,7 +58,7 @@ const KeyValueItem: FC<Props> = ({
   }, [onChange, payload])
 
   const filterOnlyFileVariable = (varPayload: Var) => {
-    return [VarType.file, VarType.arrayFile].includes(varPayload.type)
+    return ([VarType.file, VarType.arrayFile] as VarType[]).includes(varPayload.type)
   }
 
   return (
@@ -80,7 +80,7 @@ const KeyValueItem: FC<Props> = ({
             )
           : (
               <input
-                className="system-sm-regular focus:bg-gray-100! appearance-none rounded-none border-none bg-transparent outline-none hover:bg-components-input-bg-hover focus:ring-0"
+                className="focus:bg-gray-100! appearance-none rounded-none border-none bg-transparent outline-none system-sm-regular hover:bg-components-input-bg-hover focus:ring-0"
                 value={payload.key}
                 onChange={e => handleChange('key')(e.target.value)}
               />

@@ -4,14 +4,19 @@ import { RiAlertFill } from '@remixicon/react'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import Tooltip from '@/app/components/base/tooltip'
+import { useMCPToolAvailability } from '@/app/components/workflow/block-selector/context/mcp-tool-availability-context'
 
 const McpToolNotSupportTooltip: FC = () => {
   const { t } = useTranslation()
+  const { blockedBy } = useMCPToolAvailability()
+  const messageKey = blockedBy === 'sandbox'
+    ? 'detailPanel.toolSelector.mcpToolSandboxOnly'
+    : 'detailPanel.toolSelector.unsupportedMCPTool'
   return (
     <Tooltip
       popupContent={(
         <div className="w-[256px]">
-          {t('detailPanel.toolSelector.unsupportedMCPTool', { ns: 'plugin' })}
+          {t(messageKey, { ns: 'plugin' })}
         </div>
       )}
     >

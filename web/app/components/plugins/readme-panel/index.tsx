@@ -14,7 +14,7 @@ import { ReadmeShowType, useReadmePanelStore } from './store'
 
 const ReadmePanel: FC = () => {
   const { currentPluginDetail, setCurrentPluginDetail } = useReadmePanelStore()
-  const { detail, showType } = currentPluginDetail || {}
+  const { detail, showType, position } = currentPluginDetail || {}
   const { t } = useTranslation()
   const language = useLanguage()
 
@@ -87,11 +87,16 @@ const ReadmePanel: FC = () => {
 
   const portalContent = showType === ReadmeShowType.drawer
     ? (
-        <div className="fixed inset-0 z-[999] flex justify-start" onClick={onClose}>
+        <div
+          className={cn('fixed inset-0 z-[999] flex', position === 'left' ? 'justify-start' : 'justify-end')}
+          data-readme-panel-root="true"
+          onClick={onClose}
+        >
           <div
             className={cn(
               'pointer-events-auto mb-2 ml-2 mr-2 mt-16 w-[600px] max-w-[600px] justify-start rounded-2xl border-[0.5px] border-components-panel-border bg-components-panel-bg p-0 shadow-xl',
             )}
+            data-readme-panel="true"
             onClick={(event) => {
               event.stopPropagation()
             }}
@@ -101,11 +106,16 @@ const ReadmePanel: FC = () => {
         </div>
       )
     : (
-        <div className="fixed inset-0 z-[999] flex items-center justify-center p-2" onClick={onClose}>
+        <div
+          className="fixed inset-0 z-[999] flex items-center justify-center p-2"
+          data-readme-panel-root="true"
+          onClick={onClose}
+        >
           <div
             className={cn(
               'pointer-events-auto relative h-[calc(100vh-16px)] w-full max-w-[800px] rounded-2xl bg-components-panel-bg p-0 shadow-xl',
             )}
+            data-readme-panel="true"
             onClick={(event) => {
               event.stopPropagation()
             }}

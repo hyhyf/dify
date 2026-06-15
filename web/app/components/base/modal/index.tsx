@@ -1,5 +1,9 @@
+/**
+ * @deprecated Use `@/app/components/base/ui/dialog` instead.
+ * This component will be removed after migration is complete.
+ * See: https://github.com/langgenius/dify/issues/32767
+ */
 import { Dialog, DialogPanel, DialogTitle, Transition, TransitionChild } from '@headlessui/react'
-import { RiCloseLine } from '@remixicon/react'
 import { noop } from 'es-toolkit/function'
 import { Fragment } from 'react'
 import { cn } from '@/utils/classnames'
@@ -19,6 +23,7 @@ type IModal = {
   highPriority?: boolean // For modals that need to appear above dropdowns
   overlayOpacity?: boolean // For semi-transparent overlay instead of default
   clickOutsideNotClose?: boolean // Prevent closing when clicking outside modal
+  initialFocus?: React.RefObject<HTMLElement | null>
 }
 
 export default function Modal({
@@ -35,10 +40,11 @@ export default function Modal({
   highPriority = false,
   overlayOpacity = false,
   clickOutsideNotClose = false,
+  initialFocus,
 }: IModal) {
   return (
     <Transition appear show={isShow} as={Fragment}>
-      <Dialog as="div" className={cn('relative', highPriority ? 'z-[1100]' : 'z-[60]', wrapperClassName)} onClose={clickOutsideNotClose ? noop : onClose}>
+      <Dialog as="div" className={cn('relative', highPriority ? 'z-[1100]' : 'z-[60]', wrapperClassName)} onClose={clickOutsideNotClose ? noop : onClose} initialFocus={initialFocus}>
         <TransitionChild>
           <div className={cn('fixed inset-0', overlayOpacity ? 'bg-workflow-canvas-canvas-overlay' : 'bg-background-overlay', 'duration-300 ease-in data-[closed]:opacity-0', 'data-[enter]:opacity-100', 'data-[leave]:opacity-0')} />
         </TransitionChild>
@@ -55,27 +61,28 @@ export default function Modal({
                 {!!title && (
                   <DialogTitle
                     as="h3"
-                    className="title-2xl-semi-bold text-text-primary"
+                    className="text-text-primary title-2xl-semi-bold"
                   >
                     {title}
                   </DialogTitle>
                 )}
                 {!!description && (
-                  <div className="body-md-regular mt-2 text-text-secondary">
+                  <div className="mt-2 text-text-secondary body-md-regular">
                     {description}
                   </div>
                 )}
                 {closable
                   && (
                     <div className="absolute right-6 top-6 z-10 flex h-5 w-5 items-center justify-center rounded-2xl hover:cursor-pointer hover:bg-state-base-hover">
-                      <RiCloseLine
-                        className="h-4 w-4 text-text-tertiary"
+                      <span
+                        className="i-ri-close-line h-4 w-4 text-text-tertiary"
                         onClick={
                           (e) => {
                             e.stopPropagation()
                             onClose()
                           }
                         }
+                        data-testid="modal-close-button"
                       />
                     </div>
                   )}

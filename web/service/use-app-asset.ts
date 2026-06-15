@@ -1,0 +1,327 @@
+import type {
+  AppAssetNode,
+  BatchUploadNodeInput,
+  BatchUploadNodeOutput,
+  CreateFolderPayload,
+  GetFileUploadUrlPayload,
+  MoveNodePayload,
+  RenameNodePayload,
+  ReorderNodePayload,
+  UpdateFileContentPayload,
+} from '@/types/app-asset'
+import {
+  useMutation,
+  useQueryClient,
+} from '@tanstack/react-query'
+import { consoleClient, consoleQuery } from '@/service/client'
+import { upload } from './base'
+import { uploadToPresignedUrl } from './upload-to-presigned-url'
+
+export function appAssetTreeOptions(appId: string) {
+  return consoleQuery.appAsset.tree.queryOptions({
+    input: { params: { appId } },
+  })
+}
+
+export function appAssetFileContentOptions(appId: string, nodeId: string) {
+  return consoleQuery.appAsset.getFileContent.queryOptions({
+    input: { params: { appId, nodeId } },
+    select: (data) => {
+      try {
+        return JSON.parse(data.content)
+      }
+      catch {
+        return { content: data.content }
+      }
+    },
+  })
+}
+
+export function appAssetFileDownloadUrlOptions(appId: string, nodeId: string) {
+  return consoleQuery.appAsset.getFileDownloadUrl.queryOptions({
+    input: { params: { appId, nodeId } },
+  })
+}
+
+export const useCreateAppAssetFolder = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.createFolder.mutationKey(),
+    mutationFn: ({ appId, payload }: { appId: string, payload: CreateFolderPayload }) => {
+      return consoleClient.appAsset.createFolder({
+        params: { appId },
+        body: payload,
+      })
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}
+
+export const useUpdateAppAssetFileContent = () => {
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.updateFileContent.mutationKey(),
+    mutationFn: ({
+      appId,
+      nodeId,
+      payload,
+    }: {
+      appId: string
+      nodeId: string
+      payload: UpdateFileContentPayload
+    }) => {
+      return consoleClient.appAsset.updateFileContent({
+        params: { appId, nodeId },
+        body: { content: JSON.stringify(payload) },
+      })
+    },
+  })
+}
+
+export const useUpdateAppAssetFileByUpload = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async ({
+      appId,
+      nodeId,
+      file,
+      onProgress,
+    }: {
+      appId: string
+      nodeId: string
+      file: File
+      onProgress?: (progress: number) => void
+    }): Promise<AppAssetNode> => {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      const xhr = new XMLHttpRequest()
+      return upload(
+        {
+          xhr,
+          method: 'PUT',
+          data: formData,
+          onprogress: onProgress
+            ? (e) => {
+                if (e.lengthComputable)
+                  onProgress(Math.round((e.loaded / e.total) * 100))
+              }
+            : undefined,
+        },
+        false,
+        `/apps/${appId}/assets/files/${nodeId}`,
+      ) as Promise<AppAssetNode>
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.getFileContent.key({
+          type: 'query',
+          input: { params: { appId: variables.appId, nodeId: variables.nodeId } },
+        }),
+      })
+    },
+  })
+}
+
+export const useDeleteAppAssetNode = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.deleteNode.mutationKey(),
+    mutationFn: ({ appId, nodeId }: { appId: string, nodeId: string }) => {
+      return consoleClient.appAsset.deleteNode({
+        params: { appId, nodeId },
+      })
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}
+
+export const useRenameAppAssetNode = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.renameNode.mutationKey(),
+    mutationFn: ({
+      appId,
+      nodeId,
+      payload,
+    }: {
+      appId: string
+      nodeId: string
+      payload: RenameNodePayload
+    }) => {
+      return consoleClient.appAsset.renameNode({
+        params: { appId, nodeId },
+        body: payload,
+      })
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}
+
+export const useMoveAppAssetNode = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.moveNode.mutationKey(),
+    mutationFn: ({
+      appId,
+      nodeId,
+      payload,
+    }: {
+      appId: string
+      nodeId: string
+      payload: MoveNodePayload
+    }) => {
+      return consoleClient.appAsset.moveNode({
+        params: { appId, nodeId },
+        body: payload,
+      })
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}
+
+export const useReorderAppAssetNode = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.reorderNode.mutationKey(),
+    mutationFn: ({
+      appId,
+      nodeId,
+      payload,
+    }: {
+      appId: string
+      nodeId: string
+      payload: ReorderNodePayload
+    }) => {
+      return consoleClient.appAsset.reorderNode({
+        params: { appId, nodeId },
+        body: payload,
+      })
+    },
+    onSuccess: (_, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}
+
+export const useUploadFileWithPresignedUrl = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.getFileUploadUrl.mutationKey(),
+    mutationFn: async ({
+      appId,
+      file,
+      parentId,
+      onProgress,
+    }: {
+      appId: string
+      file: File
+      parentId?: string | null
+      onProgress?: (progress: number) => void
+    }): Promise<AppAssetNode> => {
+      const payload: GetFileUploadUrlPayload = {
+        name: file.name,
+        size: file.size,
+        parent_id: parentId,
+      }
+
+      const { node, upload_url } = await consoleClient.appAsset.getFileUploadUrl({
+        params: { appId },
+        body: payload,
+      })
+
+      await uploadToPresignedUrl({
+        file,
+        uploadUrl: upload_url,
+        onProgress,
+      })
+
+      return node
+    },
+    onSettled: (_, __, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}
+
+export const useBatchUpload = () => {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationKey: consoleQuery.appAsset.batchUpload.mutationKey(),
+    mutationFn: async ({
+      appId,
+      tree,
+      files,
+      parentId,
+      onProgress,
+    }: {
+      appId: string
+      tree: BatchUploadNodeInput[]
+      files: Map<string, File>
+      parentId?: string | null
+      onProgress?: (uploaded: number, total: number) => void
+    }): Promise<BatchUploadNodeOutput[]> => {
+      const response = await consoleClient.appAsset.batchUpload({
+        params: { appId },
+        body: { children: tree, parent_id: parentId },
+      })
+
+      const uploadTasks: Array<{ path: string, file: File, url: string }> = []
+
+      const extractUploads = (nodes: BatchUploadNodeOutput[], pathPrefix: string = '') => {
+        for (const node of nodes) {
+          const currentPath = pathPrefix ? `${pathPrefix}/${node.name}` : node.name
+          if (node.upload_url) {
+            const file = files.get(currentPath)
+            if (file)
+              uploadTasks.push({ path: currentPath, file, url: node.upload_url })
+          }
+          if (node.children && node.children.length > 0)
+            extractUploads(node.children, currentPath)
+        }
+      }
+
+      extractUploads(response.children)
+
+      let completed = 0
+      const total = uploadTasks.length
+
+      await Promise.all(
+        uploadTasks.map(async (task) => {
+          await uploadToPresignedUrl({
+            file: task.file,
+            uploadUrl: task.url,
+          })
+          completed++
+          onProgress?.(completed, total)
+        }),
+      )
+
+      return response.children
+    },
+    onSettled: (_, __, variables) => {
+      queryClient.invalidateQueries({
+        queryKey: consoleQuery.appAsset.tree.key({ type: 'query', input: { params: { appId: variables.appId } } }),
+      })
+    },
+  })
+}

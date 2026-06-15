@@ -3,8 +3,9 @@ import type { Field } from '../../../types'
 import type { EditData } from './edit-card'
 import { noop } from 'es-toolkit/function'
 import { produce } from 'immer'
-import Toast from '@/app/components/base/toast'
-import { ArrayType, Type } from '../../../types'
+import { useTranslation } from 'react-i18next'
+import { toast } from '@/app/components/base/ui/toast'
+import { ArrayType, FILE_REF_FORMAT, Type } from '../../../types'
 import { findPropertyWithPath } from '../../../utils'
 import { useMittContext } from './context'
 import { useVisualEditorStore } from './store'
@@ -22,6 +23,7 @@ type AddEventParams = {
 
 export const useSchemaNodeOperations = (props: VisualEditorProps) => {
   const { schema: jsonSchema, onChange: doOnChange } = props
+  const { t } = useTranslation()
   const onChange = doOnChange || noop
   const backupSchema = useVisualEditorStore(state => state.backupSchema)
   const setBackupSchema = useVisualEditorStore(state => state.setBackupSchema)
@@ -65,10 +67,7 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
       if (schema.type === Type.object) {
         const properties = schema.properties || {}
         if (properties[newName]) {
-          Toast.notify({
-            type: 'error',
-            message: 'Property name already exists',
-          })
+          toast.error(t('nodes.llm.jsonSchema.fieldNameAlreadyExists', { ns: 'workflow' }))
           emit('restorePropertyName')
           return
         }
@@ -92,10 +91,7 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
       if (schema.type === Type.array && schema.items && schema.items.type === Type.object) {
         const properties = schema.items.properties || {}
         if (properties[newName]) {
-          Toast.notify({
-            type: 'error',
-            message: 'Property name already exists',
-          })
+          toast.error(t('nodes.llm.jsonSchema.fieldNameAlreadyExists', { ns: 'workflow' }))
           emit('restorePropertyName')
           return
         }
@@ -133,12 +129,17 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
       }
       if (schema.type === Type.array)
         delete schema.items
+      delete schema.format
       switch (newType) {
         case Type.object:
           schema.type = Type.object
           schema.properties = {}
           schema.required = []
           schema.additionalProperties = false
+          break
+        case Type.file:
+          schema.type = Type.string
+          schema.format = FILE_REF_FORMAT
           break
         case ArrayType.string:
           schema.type = Type.array
@@ -165,6 +166,13 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
             properties: {},
             required: [],
             additionalProperties: false,
+          }
+          break
+        case ArrayType.file:
+          schema.type = Type.array
+          schema.items = {
+            type: Type.string,
+            format: FILE_REF_FORMAT,
           }
           break
         default:
@@ -267,10 +275,7 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
         if (oldName !== newName) {
           const properties = parentSchema.properties
           if (properties[newName]) {
-            Toast.notify({
-              type: 'error',
-              message: 'Property name already exists',
-            })
+            toast.error(t('nodes.llm.jsonSchema.fieldNameAlreadyExists', { ns: 'workflow' }))
             samePropertyNameError = true
           }
 
@@ -309,12 +314,17 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
           }
           if (schema.type === Type.array)
             delete schema.items
+          delete schema.format
           switch (newType) {
             case Type.object:
               schema.type = Type.object
               schema.properties = {}
               schema.required = []
               schema.additionalProperties = false
+              break
+            case Type.file:
+              schema.type = Type.string
+              schema.format = FILE_REF_FORMAT
               break
             case ArrayType.string:
               schema.type = Type.array
@@ -343,6 +353,13 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
                 additionalProperties: false,
               }
               break
+            case ArrayType.file:
+              schema.type = Type.array
+              schema.items = {
+                type: Type.string,
+                format: FILE_REF_FORMAT,
+              }
+              break
             default:
               schema.type = newType as Type
           }
@@ -358,10 +375,7 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
         if (oldName !== newName) {
           const properties = parentSchema.items.properties || {}
           if (properties[newName]) {
-            Toast.notify({
-              type: 'error',
-              message: 'Property name already exists',
-            })
+            toast.error(t('nodes.llm.jsonSchema.fieldNameAlreadyExists', { ns: 'workflow' }))
             samePropertyNameError = true
           }
 
@@ -398,12 +412,17 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
           }
           if (schema.type === Type.array)
             delete schema.items
+          delete schema.format
           switch (newType) {
             case Type.object:
               schema.type = Type.object
               schema.properties = {}
               schema.required = []
               schema.additionalProperties = false
+              break
+            case Type.file:
+              schema.type = Type.string
+              schema.format = FILE_REF_FORMAT
               break
             case ArrayType.string:
               schema.type = Type.array
@@ -430,6 +449,13 @@ export const useSchemaNodeOperations = (props: VisualEditorProps) => {
                 properties: {},
                 required: [],
                 additionalProperties: false,
+              }
+              break
+            case ArrayType.file:
+              schema.type = Type.array
+              schema.items = {
+                type: Type.string,
+                format: FILE_REF_FORMAT,
               }
               break
             default:

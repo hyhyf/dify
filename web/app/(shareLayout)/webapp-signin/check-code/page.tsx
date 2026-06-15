@@ -1,15 +1,15 @@
 'use client'
 import type { FormEvent } from 'react'
 import { RiArrowLeftLine, RiMailSendFill } from '@remixicon/react'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import Countdown from '@/app/components/signin/countdown'
 import { useLocale } from '@/context/i18n'
 import { useWebAppStore } from '@/context/web-app-context'
+import { useRouter, useSearchParams } from '@/next/navigation'
 import { sendWebAppEMailLoginCode, webAppEmailLoginWithCode } from '@/service/common'
 import { fetchAccessToken } from '@/service/share'
 import { setWebAppAccessToken, setWebAppPassport } from '@/service/webapp-auth'
@@ -43,24 +43,15 @@ export default function CheckCode() {
     try {
       const appCode = getAppCodeFromRedirectUrl()
       if (!code.trim()) {
-        Toast.notify({
-          type: 'error',
-          message: t('checkCode.emptyCode', { ns: 'login' }),
-        })
+        toast.error(t('checkCode.emptyCode', { ns: 'login' }))
         return
       }
       if (!/\d{6}/.test(code)) {
-        Toast.notify({
-          type: 'error',
-          message: t('checkCode.invalidCode', { ns: 'login' }),
-        })
+        toast.error(t('checkCode.invalidCode', { ns: 'login' }))
         return
       }
       if (!redirectUrl || !appCode) {
-        Toast.notify({
-          type: 'error',
-          message: t('error.redirectUrlMissing', { ns: 'login' }),
-        })
+        toast.error(t('error.redirectUrlMissing', { ns: 'login' }))
         return
       }
       setIsLoading(true)
@@ -110,8 +101,8 @@ export default function CheckCode() {
         <RiMailSendFill className="h-6 w-6 text-2xl text-text-accent-light-mode-only" />
       </div>
       <div className="pb-4 pt-2">
-        <h2 className="title-4xl-semi-bold text-text-primary">{t('checkCode.checkYourEmail', { ns: 'login' })}</h2>
-        <p className="body-md-regular mt-2 text-text-secondary">
+        <h2 className="text-text-primary title-4xl-semi-bold">{t('checkCode.checkYourEmail', { ns: 'login' })}</h2>
+        <p className="mt-2 text-text-secondary body-md-regular">
           <span>
             {t('checkCode.tipsPrefix', { ns: 'login' })}
             <strong>{email}</strong>
@@ -122,7 +113,7 @@ export default function CheckCode() {
       </div>
 
       <form onSubmit={handleSubmit}>
-        <label htmlFor="code" className="system-md-semibold mb-1 text-text-secondary">{t('checkCode.verificationCode', { ns: 'login' })}</label>
+        <label htmlFor="code" className="mb-1 text-text-secondary system-md-semibold">{t('checkCode.verificationCode', { ns: 'login' })}</label>
         <Input
           ref={codeInputRef}
           id="code"
@@ -142,7 +133,7 @@ export default function CheckCode() {
         <div className="bg-background-default-dimm inline-block rounded-full p-1">
           <RiArrowLeftLine size={12} />
         </div>
-        <span className="system-xs-regular ml-2">{t('back', { ns: 'login' })}</span>
+        <span className="ml-2 system-xs-regular">{t('back', { ns: 'login' })}</span>
       </div>
     </div>
   )

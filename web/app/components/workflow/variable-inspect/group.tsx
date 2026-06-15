@@ -1,4 +1,4 @@
-import type { currentVarType } from './panel'
+import type { currentVarType } from './variables-tab'
 import type { NodeWithVar, VarInInspect } from '@/types/workflow'
 import {
   RiArrowRightSLine,
@@ -11,19 +11,21 @@ import { useState } from 'react'
 import { useTranslation } from 'react-i18next'
 // import Button from '@/app/components/base/button'
 import ActionButton from '@/app/components/base/action-button'
+import { AtSign } from '@/app/components/base/icons/src/vender/workflow'
 import Tooltip from '@/app/components/base/tooltip'
 import BlockIcon from '@/app/components/workflow/block-icon'
 import { VariableIconWithColor } from '@/app/components/workflow/nodes/_base/components/variable/variable-label'
 import { VarInInspectType } from '@/types/workflow'
 import { cn } from '@/utils/classnames'
 import { useToolIcon } from '../hooks'
+import { formatVarTypeLabel } from './utils'
 
 type Props = {
   nodeData?: NodeWithVar
   currentVar?: currentVarType
   varType: VarInInspectType
   varList: VarInInspect[]
-  handleSelect: (state: any) => void
+  handleSelect: (state: currentVarType) => void
   handleView?: () => void
   handleClear?: () => void
 }
@@ -48,7 +50,7 @@ const Group = ({
 
   const visibleVarList = isEnv ? varList : varList.filter(v => v.visible)
 
-  const handleSelectVar = (varItem: any, type?: string) => {
+  const handleSelectVar = (varItem: VarInInspect, type?: VarInInspectType) => {
     if (type === VarInInspectType.environment) {
       handleSelect({
         nodeId: VarInInspectType.environment,
@@ -105,7 +107,7 @@ const Group = ({
             <RiLoader2Line className="h-3 w-3 animate-spin text-text-accent" />
           )}
           {(!nodeData || !nodeData.isSingRunRunning) && visibleVarList.length > 0 && (
-            <RiArrowRightSLine className={cn('h-3 w-3 text-text-tertiary', !isCollapsed && 'rotate-90')} onClick={() => setIsCollapsed(!isCollapsed)} />
+            <RiArrowRightSLine className={cn('h-3 w-3 text-text-tertiary', !isCollapsed && 'rotate-90')} aria-hidden="true" />
           )}
         </div>
         <div className="flex grow cursor-pointer items-center gap-1" onClick={() => setIsCollapsed(!isCollapsed)}>
@@ -117,11 +119,11 @@ const Group = ({
                 toolIcon={toolIcon || ''}
                 size="xs"
               />
-              <div className="system-xs-medium-uppercase truncate text-text-tertiary">{nodeData.title}</div>
+              <div className="truncate text-text-tertiary system-xs-medium-uppercase">{nodeData.title}</div>
             </>
           )}
           {!nodeData && (
-            <div className="system-xs-medium-uppercase truncate text-text-tertiary">
+            <div className="truncate text-text-tertiary system-xs-medium-uppercase">
               {isEnv && t('debug.variableInspect.envNode', { ns: 'workflow' })}
               {isChatVar && t('debug.variableInspect.chatNode', { ns: 'workflow' })}
               {isSystem && t('debug.variableInspect.systemNode', { ns: 'workflow' })}
@@ -146,24 +148,33 @@ const Group = ({
       {/* var item list */}
       {!isCollapsed && !nodeData?.isSingRunRunning && (
         <div className="px-0.5">
-          {visibleVarList.length > 0 && visibleVarList.map(varItem => (
-            <div
-              key={varItem.id}
-              className={cn(
-                'relative flex cursor-pointer items-center gap-1 rounded-md px-3 py-1 hover:bg-state-base-hover',
-                varItem.id === currentVar?.var?.id && 'bg-state-base-hover-alt hover:bg-state-base-hover-alt',
-              )}
-              onClick={() => handleSelectVar(varItem, varType)}
-            >
-              <VariableIconWithColor
-                variableCategory={varType}
-                isExceptionVariable={['error_type', 'error_message'].includes(varItem.name)}
-                className="size-4"
-              />
-              <div className="system-sm-medium grow truncate text-text-secondary">{varItem.name}</div>
-              <div className="system-xs-regular shrink-0 text-text-tertiary">{varItem.value_type}</div>
-            </div>
-          ))}
+          {visibleVarList.length > 0 && visibleVarList.map((varItem) => {
+            const isAgentAliasVar = typeof varItem.name === 'string' && varItem.name.startsWith('@')
+            const displayName = isAgentAliasVar ? varItem.name.slice(1) : varItem.name
+            return (
+              <button
+                type="button"
+                key={varItem.id}
+                className={cn(
+                  'relative flex w-full cursor-pointer items-center gap-1 rounded-md px-3 py-1 text-left hover:bg-state-base-hover',
+                  varItem.id === currentVar?.var?.id && 'bg-state-base-hover-alt hover:bg-state-base-hover-alt',
+                )}
+                onClick={() => handleSelectVar(varItem, varType)}
+              >
+                {isAgentAliasVar
+                  ? <AtSign className="size-4 shrink-0 text-util-colors-violet-violet-600" />
+                  : (
+                      <VariableIconWithColor
+                        variableCategory={varType}
+                        isExceptionVariable={['error_type', 'error_message'].includes(varItem.name)}
+                        className="size-4"
+                      />
+                    )}
+                <div className="grow truncate text-text-secondary system-sm-medium">{displayName}</div>
+                <div className="shrink-0 text-text-tertiary system-xs-regular">{formatVarTypeLabel(varItem.value_type)}</div>
+              </button>
+            )
+          })}
         </div>
       )}
     </div>

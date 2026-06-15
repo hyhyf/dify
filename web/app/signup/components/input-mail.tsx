@@ -1,15 +1,15 @@
 'use client'
 import type { MailSendResponse } from '@/service/use-common'
-import Link from 'next/link'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import Split from '@/app/signin/split'
 import { emailRegex } from '@/config'
 import { useGlobalPublicStore } from '@/context/global-public-context'
 import { useLocale } from '@/context/i18n'
+import Link from '@/next/link'
 import { useSendMail } from '@/service/use-common'
 
 type Props = {
@@ -30,14 +30,11 @@ export default function Form({
       return
 
     if (!email) {
-      Toast.notify({ type: 'error', message: t('error.emailEmpty', { ns: 'login' }) })
+      toast.error(t('error.emailEmpty', { ns: 'login' }))
       return
     }
     if (!emailRegex.test(email)) {
-      Toast.notify({
-        type: 'error',
-        message: t('error.emailInValid', { ns: 'login' }),
-      })
+      toast.error(t('error.emailInValid', { ns: 'login' }))
       return
     }
     const res = await submitMail({ email, language: locale })
@@ -52,7 +49,7 @@ export default function Form({
     }}
     >
       <div className="mb-3">
-        <label htmlFor="email" className="system-md-semibold my-2 text-text-secondary">
+        <label htmlFor="email" className="my-2 text-text-secondary system-md-semibold">
           {t('email', { ns: 'login' })}
         </label>
         <div className="mt-1">
@@ -92,11 +89,11 @@ export default function Form({
 
       {!systemFeatures.branding.enabled && (
         <>
-          <div className="system-xs-regular mt-3 block w-full text-text-tertiary">
+          <div className="mt-3 block w-full text-text-tertiary system-xs-regular">
             {t('tosDesc', { ns: 'login' })}
             &nbsp;
             <Link
-              className="system-xs-medium text-text-secondary hover:underline"
+              className="text-text-secondary system-xs-medium hover:underline"
               target="_blank"
               rel="noopener noreferrer"
               href="https://dify.ai/terms"
@@ -105,7 +102,7 @@ export default function Form({
             </Link>
             &nbsp;&&nbsp;
             <Link
-              className="system-xs-medium text-text-secondary hover:underline"
+              className="text-text-secondary system-xs-medium hover:underline"
               target="_blank"
               rel="noopener noreferrer"
               href="https://dify.ai/privacy"

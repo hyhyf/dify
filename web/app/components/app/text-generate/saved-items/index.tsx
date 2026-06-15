@@ -11,7 +11,7 @@ import { useTranslation } from 'react-i18next'
 import ActionButton from '@/app/components/base/action-button'
 import { Markdown } from '@/app/components/base/markdown'
 import NewAudioButton from '@/app/components/base/new-audio-button'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { cn } from '@/utils/classnames'
 import NoData from './no-data'
 
@@ -48,7 +48,7 @@ const SavedItems: FC<ISavedItemsProps> = ({
                   >
                     <Markdown content={answer} />
                   </div>
-                  <div className="system-xs-regular mt-1 h-4 px-4 text-text-quaternary">
+                  <div className="mt-1 h-4 px-4 text-text-quaternary system-xs-regular">
                     <span>
                       {answer.length}
                       {' '}
@@ -60,7 +60,7 @@ const SavedItems: FC<ISavedItemsProps> = ({
                       {isShowTextToSpeech && <NewAudioButton value={answer} />}
                       <ActionButton onClick={() => {
                         copy(answer)
-                        Toast.notify({ type: 'success', message: t('actionMsg.copySuccessfully', { ns: 'common' }) })
+                        toast.success(t('actionMsg.copySuccessfully', { ns: 'common' }))
                       }}
                       >
                         <RiClipboardLine className="h-4 w-4" />

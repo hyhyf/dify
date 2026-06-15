@@ -5,13 +5,13 @@ from sqlalchemy import select
 
 from core.app.apps.base_app_queue_manager import AppQueueManager, PublishFrom
 from core.app.entities.app_invoke_entities import InvokeFrom
-from core.app.entities.queue_entities import QueueRetrieverResourcesEvent
 from core.rag.entities.citation_metadata import RetrievalSourceMetadata
 from core.rag.index_processor.constant.index_type import IndexStructureType
 from core.rag.models.document import Document
 from extensions.ext_database import db
 from models.dataset import ChildChunk, DatasetQuery, DocumentSegment
 from models.dataset import Document as DatasetDocument
+from models.enums import CreatorUserRole, DatasetQuerySource
 
 _logger = logging.getLogger(__name__)
 
@@ -35,10 +35,12 @@ class DatasetIndexToolCallbackHandler:
         dataset_query = DatasetQuery(
             dataset_id=dataset_id,
             content=query,
-            source="app",
+            source=DatasetQuerySource.APP,
             source_app_id=self._app_id,
             created_by_role=(
-                "account" if self._invoke_from in {InvokeFrom.EXPLORE, InvokeFrom.DEBUGGER} else "end_user"
+                CreatorUserRole.ACCOUNT
+                if self._invoke_from in {InvokeFrom.EXPLORE, InvokeFrom.DEBUGGER}
+                else CreatorUserRole.END_USER
             ),
             created_by=self._user_id,
         )
@@ -90,6 +92,8 @@ class DatasetIndexToolCallbackHandler:
     # TODO(-LAN-): Improve type check
     def return_retriever_resource_info(self, resource: Sequence[RetrievalSourceMetadata]):
         """Handle return_retriever_resource_info."""
+        from core.app.entities.queue_entities import QueueRetrieverResourcesEvent
+
         self._queue_manager.publish(
             QueueRetrieverResourcesEvent(retriever_resources=resource), PublishFrom.APPLICATION_MANAGER
         )

@@ -9,7 +9,7 @@ import AppIcon from '@/app/components/base/app-icon'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
 import Modal from '@/app/components/base/modal'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import AppsFull from '@/app/components/billing/apps-full-in-dialog'
 import { useProviderContext } from '@/context/provider-context'
 import { cn } from '@/utils/classnames'
@@ -57,7 +57,7 @@ const DuplicateAppModal = ({
 
   const submit = () => {
     if (!name.trim()) {
-      Toast.notify({ type: 'error', message: t('appCustomize.nameRequired', { ns: 'explore' }) })
+      toast.error(t('appCustomize.nameRequired', { ns: 'explore' }))
       return
     }
     onConfirm({
@@ -80,8 +80,8 @@ const DuplicateAppModal = ({
           <RiCloseLine className="h-4 w-4 text-text-tertiary" />
         </div>
         <div className="relative mb-9 mt-3 text-xl font-semibold leading-[30px] text-text-primary">{t('duplicateTitle', { ns: 'app' })}</div>
-        <div className="system-sm-regular mb-9 text-text-secondary">
-          <div className="system-md-medium mb-2">{t('appCustomize.subTitle', { ns: 'explore' })}</div>
+        <div className="mb-9 text-text-secondary system-sm-regular">
+          <div className="mb-2 system-md-medium">{t('appCustomize.subTitle', { ns: 'explore' })}</div>
           <div className="flex items-center justify-between space-x-2">
             <AppIcon
               size="large"

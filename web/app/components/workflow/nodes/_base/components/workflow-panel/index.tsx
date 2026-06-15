@@ -1,6 +1,5 @@
 import type { FC, ReactNode } from 'react'
 import type { SimpleSubscription } from '@/app/components/plugins/plugin-detail-panel/subscription-list'
-import type { CustomRunFormProps } from '@/app/components/workflow/nodes/data-source/types'
 import type { Node } from '@/app/components/workflow/types'
 import {
   RiCloseLine,
@@ -22,6 +21,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { useStore as useAppStore } from '@/app/components/app/store'
 import { Stop } from '@/app/components/base/icons/src/vender/line/mediaAndDevices'
 import Tooltip from '@/app/components/base/tooltip'
+import { UserAvatarList } from '@/app/components/base/user-avatar-list'
 import { ACCOUNT_SETTING_TAB } from '@/app/components/header/account-setting/constants'
 import { useLanguage } from '@/app/components/header/account-setting/model-provider-page/hooks'
 import {
@@ -34,6 +34,8 @@ import {
 import { usePluginStore } from '@/app/components/plugins/plugin-detail-panel/store'
 import { ReadmeEntrance } from '@/app/components/plugins/readme-panel/entrance'
 import BlockIcon from '@/app/components/workflow/block-icon'
+import { collaborationManager } from '@/app/components/workflow/collaboration/core/collaboration-manager'
+import { useCollaboration } from '@/app/components/workflow/collaboration/hooks/use-collaboration'
 import {
   useAvailableBlocks,
   useNodeDataUpdate,
@@ -47,8 +49,6 @@ import {
 import { useHooksStore } from '@/app/components/workflow/hooks-store'
 import useInspectVarsCrud from '@/app/components/workflow/hooks/use-inspect-vars-crud'
 import Split from '@/app/components/workflow/nodes/_base/components/split'
-import DataSourceBeforeRunForm from '@/app/components/workflow/nodes/data-source/before-run-form'
-import { DataSourceClassification } from '@/app/components/workflow/nodes/data-source/types'
 import { useLogs } from '@/app/components/workflow/run/hooks'
 import SpecialResultPanel from '@/app/components/workflow/run/special-result-panel'
 import { useStore } from '@/app/components/workflow/store'
@@ -59,11 +59,11 @@ import {
   hasRetryNode,
   isSupportCustomRunForm,
 } from '@/app/components/workflow/utils'
+import { useAppContext } from '@/context/app-context'
 import { useModalContext } from '@/context/modal-context'
 import { useAllBuiltInTools } from '@/service/use-tools'
 import { useAllTriggerPlugins } from '@/service/use-triggers'
 import { FlowType } from '@/types/common'
-import { canFindTool } from '@/utils'
 import { cn } from '@/utils/classnames'
 import { useResizePanel } from '../../hooks/use-resize-panel'
 import BeforeRunForm from '../before-run-form'
@@ -74,27 +74,19 @@ import NextStep from '../next-step'
 import PanelOperator from '../panel-operator'
 import RetryOnPanel from '../retry/retry-on-panel'
 import { DescriptionInput, TitleInput } from '../title-description-input'
+import {
+  clampNodePanelWidth,
+  getCompressedNodePanelWidth,
+  getCurrentDataSource,
+  getCurrentToolCollection,
+  getCurrentTriggerPlugin,
+  getCustomRunForm,
+  getMaxNodePanelWidth,
+} from './helpers'
 import LastRun from './last-run'
 import useLastRun from './last-run/use-last-run'
 import Tab, { TabType } from './tab'
 import { TriggerSubscription } from './trigger-subscription'
-
-const getCustomRunForm = (params: CustomRunFormProps): React.JSX.Element => {
-  const nodeType = params.payload.type
-  switch (nodeType) {
-    case BlockEnum.DataSource:
-      return <DataSourceBeforeRunForm {...params} />
-    default:
-      return (
-        <div>
-          Custom Run Form:
-          {nodeType}
-          {' '}
-          not found
-        </div>
-      )
-  }
-}
 
 type BasePanelProps = {
   children: ReactNode
@@ -109,10 +101,51 @@ const BasePanel: FC<BasePanelProps> = ({
 }) => {
   const { t } = useTranslation()
   const language = useLanguage()
+  const appId = useStore(s => s.appId)
+  const isWorkflowCollaborationEnabled = useStore(s => !s.isRestoring && !s.historyWorkflowData)
+  const { userProfile } = useAppContext()
+  const { isConnected, nodePanelPresence } = useCollaboration(appId as string, undefined, isWorkflowCollaborationEnabled)
   const { showMessageLogModal } = useAppStore(useShallow(state => ({
     showMessageLogModal: state.showMessageLogModal,
   })))
   const isSingleRunning = data._singleRunningStatus === NodeRunningStatus.Running
+
+  const currentUserPresence = useMemo(() => {
+    const userId = userProfile?.id || ''
+    const username = userProfile?.name || userProfile?.email || 'User'
+    const avatar = userProfile?.avatar_url || userProfile?.avatar || null
+
+    return {
+      userId,
+      username,
+      avatar,
+    }
+  }, [userProfile?.avatar, userProfile?.avatar_url, userProfile?.email, userProfile?.id, userProfile?.name])
+
+  useEffect(() => {
+    if (!isConnected || !currentUserPresence.userId)
+      return
+
+    collaborationManager.emitNodePanelPresence(id, true, currentUserPresence)
+
+    return () => {
+      collaborationManager.emitNodePanelPresence(id, false, currentUserPresence)
+    }
+  }, [id, isConnected, currentUserPresence])
+
+  const viewingUsers = useMemo(() => {
+    const presence = nodePanelPresence?.[id]
+    if (!presence)
+      return []
+
+    return Object.values(presence)
+      .filter(viewer => viewer.userId && viewer.userId !== currentUserPresence.userId)
+      .map(viewer => ({
+        id: viewer.userId,
+        name: viewer.username,
+        avatar_url: viewer.avatar || null,
+      }))
+  }, [currentUserPresence.userId, id, nodePanelPresence])
 
   const showSingleRunPanel = useStore(s => s.showSingleRunPanel)
   const workflowCanvasWidth = useStore(s => s.workflowCanvasWidth)
@@ -124,17 +157,13 @@ const BasePanel: FC<BasePanelProps> = ({
 
   const reservedCanvasWidth = 400 // Reserve the minimum visible width for the canvas
 
-  const maxNodePanelWidth = useMemo(() => {
-    if (!workflowCanvasWidth)
-      return 720
-
-    const available = workflowCanvasWidth - (otherPanelWidth || 0) - reservedCanvasWidth
-    return Math.max(available, 400)
-  }, [workflowCanvasWidth, otherPanelWidth])
+  const maxNodePanelWidth = useMemo(
+    () => getMaxNodePanelWidth(workflowCanvasWidth, otherPanelWidth, reservedCanvasWidth),
+    [workflowCanvasWidth, otherPanelWidth],
+  )
 
   const updateNodePanelWidth = useCallback((width: number, source: 'user' | 'system' = 'user') => {
-    // Ensure the width is within the min and max range
-    const newValue = Math.max(400, Math.min(width, maxNodePanelWidth))
+    const newValue = clampNodePanelWidth(width, maxNodePanelWidth)
 
     if (source === 'user')
       localStorage.setItem('workflow-node-panel-width', `${newValue}`)
@@ -162,15 +191,9 @@ const BasePanel: FC<BasePanelProps> = ({
   })
 
   useEffect(() => {
-    if (!workflowCanvasWidth)
-      return
-
-    // If the total width of the three exceeds the canvas, shrink the node panel to the available range (at least 400px)
-    const total = nodePanelWidth + otherPanelWidth + reservedCanvasWidth
-    if (total > workflowCanvasWidth) {
-      const target = Math.max(workflowCanvasWidth - otherPanelWidth - reservedCanvasWidth, 400)
-      debounceUpdate(target)
-    }
+    const compressedWidth = getCompressedNodePanelWidth(nodePanelWidth, workflowCanvasWidth, otherPanelWidth, reservedCanvasWidth)
+    if (compressedWidth !== undefined)
+      debounceUpdate(compressedWidth)
   }, [nodePanelWidth, otherPanelWidth, workflowCanvasWidth, debounceUpdate])
 
   const { handleNodeSelect } = useNodesInteractions()
@@ -231,6 +254,8 @@ const BasePanel: FC<BasePanelProps> = ({
   } = useNodesMetaData()
 
   const configsMap = useHooksStore(s => s.configsMap)
+  const interactionMode = useHooksStore(s => s.interactionMode)
+  const allowGraphActions = interactionMode !== 'subgraph'
   const {
     isShowSingleRun,
     hideSingleRun,
@@ -280,25 +305,21 @@ const BasePanel: FC<BasePanelProps> = ({
   }, [pendingSingleRun, id, handleSingleRun, handleStop, setPendingSingleRun])
 
   const logParams = useLogs()
-  const passedLogParams = useMemo(() => [BlockEnum.Tool, BlockEnum.Agent, BlockEnum.Iteration, BlockEnum.Loop].includes(data.type) ? logParams : {}, [data.type, logParams])
+  const passedLogParams = useMemo(() => ([BlockEnum.Tool, BlockEnum.Agent, BlockEnum.Iteration, BlockEnum.Loop] as BlockEnum[]).includes(data.type) ? logParams : {}, [data.type, logParams])
 
   const storeBuildInTools = useStore(s => s.buildInTools)
   const { data: buildInTools } = useAllBuiltInTools()
-  const currToolCollection = useMemo(() => {
-    const candidates = buildInTools ?? storeBuildInTools
-    return candidates?.find(item => canFindTool(item.id, data.provider_id))
-  }, [buildInTools, storeBuildInTools, data.provider_id])
+  const currToolCollection = useMemo(
+    () => getCurrentToolCollection(buildInTools, storeBuildInTools, data.provider_id),
+    [buildInTools, storeBuildInTools, data.provider_id],
+  )
   const needsToolAuth = useMemo(() => {
     return data.type === BlockEnum.Tool && currToolCollection?.allow_delete
   }, [data.type, currToolCollection?.allow_delete])
 
   // only fetch trigger plugins when the node is a trigger plugin
   const { data: triggerPlugins = [] } = useAllTriggerPlugins(data.type === BlockEnum.TriggerPlugin)
-  const currentTriggerPlugin = useMemo(() => {
-    if (data.type !== BlockEnum.TriggerPlugin || !data.plugin_id || !triggerPlugins?.length)
-      return undefined
-    return triggerPlugins?.find(p => p.plugin_id === data.plugin_id)
-  }, [data.type, data.plugin_id, triggerPlugins])
+  const currentTriggerPlugin = useMemo(() => getCurrentTriggerPlugin(data, triggerPlugins), [data, triggerPlugins])
   const { setDetail } = usePluginStore()
 
   useEffect(() => {
@@ -321,10 +342,7 @@ const BasePanel: FC<BasePanelProps> = ({
 
   const dataSourceList = useStore(s => s.dataSourceList)
 
-  const currentDataSource = useMemo(() => {
-    if (data.type === BlockEnum.DataSource && data.provider_type !== DataSourceClassification.localFile)
-      return dataSourceList?.find(item => item.plugin_id === data.plugin_id)
-  }, [dataSourceList, data.provider_id, data.type, data.provider_type])
+  const currentDataSource = useMemo(() => getCurrentDataSource(data, dataSourceList), [data, dataSourceList])
 
   const handleAuthorizationItemClick = useCallback((credential_id: string) => {
     handleNodeDataUpdateWithSyncDraft({
@@ -381,7 +399,7 @@ const BasePanel: FC<BasePanelProps> = ({
   if (logParams.showSpecialResultPanel) {
     return (
       <div className={cn(
-        'relative mr-1  h-full',
+        'relative mr-1 h-full',
       )}
       >
         <div
@@ -421,7 +439,7 @@ const BasePanel: FC<BasePanelProps> = ({
 
     return (
       <div className={cn(
-        'relative mr-1  h-full',
+        'relative mr-1 h-full',
       )}
       >
         <div
@@ -445,6 +463,7 @@ const BasePanel: FC<BasePanelProps> = ({
                   {...passedLogParams}
                   existVarValuesInForms={getExistVarValuesInForms(singleRunParams?.forms as any)}
                   filteredExistVarForms={getFilteredExistVarForms(singleRunParams?.forms as any)}
+                  handleAfterHumanInputStepRun={handleAfterCustomSingleRun}
                 />
               )}
 
@@ -471,6 +490,7 @@ const BasePanel: FC<BasePanelProps> = ({
       </div>
       <div
         ref={containerRef}
+        data-workflow-node-panel="true"
         className={cn('flex h-full flex-col rounded-2xl border-[0.5px] border-components-panel-border bg-components-panel-bg shadow-lg transition-[width] ease-linear', showSingleRunPanel ? 'overflow-hidden' : 'overflow-y-auto')}
         style={{
           width: `${nodePanelWidth}px`,
@@ -480,7 +500,7 @@ const BasePanel: FC<BasePanelProps> = ({
           <div className="flex items-center px-4 pb-1 pt-4">
             <BlockIcon
               className="mr-1 shrink-0"
-              type={data.type}
+              type={data._iconTypeOverride ?? data.type}
               toolIcon={toolIcon}
               size="md"
             />
@@ -488,6 +508,15 @@ const BasePanel: FC<BasePanelProps> = ({
               value={data.title || ''}
               onBlur={handleTitleBlur}
             />
+            {viewingUsers.length > 0 && (
+              <div className="ml-3 shrink-0">
+                <UserAvatarList
+                  users={viewingUsers}
+                  maxVisible={3}
+                  size={24}
+                />
+              </div>
+            )}
             <div className="flex shrink-0 items-center text-text-tertiary">
               {
                 isSupportSingleRun && !nodesReadOnly && (
@@ -514,9 +543,9 @@ const BasePanel: FC<BasePanelProps> = ({
                   </Tooltip>
                 )
               }
-              <HelpLink nodeType={data.type} />
-              <PanelOperator id={id} data={data} showHelpLink={false} />
-              <div className="mx-3 h-3.5 w-[1px] bg-divider-regular" />
+              {allowGraphActions && <HelpLink nodeType={data.type} />}
+              {allowGraphActions && <PanelOperator id={id} data={data} showHelpLink={false} />}
+              {allowGraphActions && <div className="mx-3 h-3.5 w-[1px] bg-divider-regular" />}
               <div
                 className="flex h-6 w-6 cursor-pointer items-center justify-center"
                 onClick={() => handleNodeSelect(id, true)}
@@ -639,19 +668,19 @@ const BasePanel: FC<BasePanelProps> = ({
               )
             }
             {
-              !!availableNextBlocks.length && (
+              allowGraphActions && !!availableNextBlocks.length && (
                 <div className="border-t-[0.5px] border-divider-regular p-4">
-                  <div className="system-sm-semibold-uppercase mb-1 flex items-center text-text-secondary">
+                  <div className="mb-1 flex items-center text-text-secondary system-sm-semibold-uppercase">
                     {t('panel.nextStep', { ns: 'workflow' }).toLocaleUpperCase()}
                   </div>
-                  <div className="system-xs-regular mb-2 text-text-tertiary">
+                  <div className="mb-2 text-text-tertiary system-xs-regular">
                     {t('panel.addNextStep', { ns: 'workflow' })}
                   </div>
                   <NextStep selectedNode={selectedNode} />
                 </div>
               )
             }
-            {readmeEntranceComponent}
+            {allowGraphActions ? readmeEntranceComponent : null}
           </div>
         )}
 

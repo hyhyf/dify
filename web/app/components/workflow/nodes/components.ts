@@ -8,14 +8,20 @@ import AssignerNode from './assigner/node'
 import AssignerPanel from './assigner/panel'
 import CodeNode from './code/node'
 import CodePanel from './code/panel'
+import CommandNode from './command/node'
+import CommandPanel from './command/panel'
 import DataSourceNode from './data-source/node'
 import DataSourcePanel from './data-source/panel'
 import DocExtractorNode from './document-extractor/node'
 import DocExtractorPanel from './document-extractor/panel'
 import EndNode from './end/node'
 import EndPanel from './end/panel'
+import FileUploadNode from './file-upload/node'
+import FileUploadPanel from './file-upload/panel'
 import HttpNode from './http/node'
 import HttpPanel from './http/panel'
+import HumanInputNode from './human-input/node'
+import HumanInputPanel from './human-input/panel'
 import IfElseNode from './if-else/node'
 import IfElsePanel from './if-else/panel'
 import IterationNode from './iteration/node'
@@ -72,9 +78,12 @@ export const NodeComponentMap: Record<string, ComponentType<any>> = {
   [BlockEnum.Agent]: AgentNode,
   [BlockEnum.DataSource]: DataSourceNode,
   [BlockEnum.KnowledgeBase]: KnowledgeBaseNode,
+  [BlockEnum.HumanInput]: HumanInputNode,
   [BlockEnum.TriggerSchedule]: TriggerScheduleNode,
   [BlockEnum.TriggerWebhook]: TriggerWebhookNode,
   [BlockEnum.TriggerPlugin]: TriggerPluginNode,
+  [BlockEnum.Command]: CommandNode,
+  [BlockEnum.FileUpload]: FileUploadNode,
 }
 
 export const PanelComponentMap: Record<string, ComponentType<any>> = {
@@ -100,7 +109,10 @@ export const PanelComponentMap: Record<string, ComponentType<any>> = {
   [BlockEnum.Agent]: AgentPanel,
   [BlockEnum.DataSource]: DataSourcePanel,
   [BlockEnum.KnowledgeBase]: KnowledgeBasePanel,
+  [BlockEnum.HumanInput]: HumanInputPanel,
   [BlockEnum.TriggerSchedule]: TriggerSchedulePanel,
   [BlockEnum.TriggerWebhook]: TriggerWebhookPanel,
   [BlockEnum.TriggerPlugin]: TriggerPluginPanel,
+  [BlockEnum.Command]: CommandPanel,
+  [BlockEnum.FileUpload]: FileUploadPanel,
 }

@@ -51,6 +51,14 @@ class AppImportPayload(BaseModel):
     app_id: str | None = Field(None)
 
 
+class AppImportBundleConfirmPayload(BaseModel):
+    name: str | None = None
+    description: str | None = None
+    icon_type: str | None = None
+    icon: str | None = None
+    icon_background: str | None = None
+
+
 console_ns.schema_model(
     AppImportPayload.__name__, AppImportPayload.model_json_schema(ref_template=DEFAULT_REF_TEMPLATE_SWAGGER_2_0)
 )
@@ -138,4 +146,69 @@ class AppImportCheckDependenciesApi(Resource):
             import_service = AppDslService(session)
             result = import_service.check_dependencies(app_model=app_model)
 
+        return result.model_dump(mode="json"), 200
+
+
+@console_ns.route("/apps/imports-bundle/prepare")
+class AppImportBundlePrepareApi(Resource):
+    """Step 1: Get upload URL for bundle import."""
+
+    @setup_required
+    @login_required
+    @account_initialization_required
+    @edit_permission_required
+    def post(self):
+        from services.app_bundle_service import AppBundleService
+
+        current_user, current_tenant_id = current_account_with_tenant()
+
+        result = AppBundleService.prepare_import(
+            tenant_id=current_tenant_id,
+            account_id=current_user.id,
+        )
+
+        return {"import_id": result.import_id, "upload_url": result.upload_url}, 200
+
+
+@console_ns.route("/apps/imports-bundle/<string:import_id>/confirm")
+class AppImportBundleConfirmApi(Resource):
+    """Step 2: Confirm bundle import after upload."""
+
+    @setup_required
+    @login_required
+    @account_initialization_required
+    @marshal_with(app_import_model)
+    @cloud_edition_billing_resource_check("apps")
+    @edit_permission_required
+    def post(self, import_id: str):
+        from flask import request
+
+        from core.app.entities.app_bundle_entities import BundleFormatError
+        from services.app_bundle_service import AppBundleService
+
+        current_user, _ = current_account_with_tenant()
+
+        args = AppImportBundleConfirmPayload.model_validate(request.get_json() or {})
+
+        try:
+            result = AppBundleService.confirm_import(
+                import_id=import_id,
+                account=current_user,
+                name=args.name,
+                description=args.description,
+                icon_type=args.icon_type,
+                icon=args.icon,
+                icon_background=args.icon_background,
+            )
+        except BundleFormatError as e:
+            return {"error": str(e)}, 400
+
+        if result.app_id and FeatureService.get_system_features().webapp_auth.enabled:
+            EnterpriseService.WebAppAuth.update_app_access_mode(result.app_id, "private")
+
+        status = result.status
+        if status == ImportStatus.FAILED:
+            return result.model_dump(mode="json"), 400
+        elif status == ImportStatus.PENDING:
+            return result.model_dump(mode="json"), 202
         return result.model_dump(mode="json"), 200

@@ -33,18 +33,34 @@ export const useWorkflowNodeStarted = () => {
       transform,
     } = store.getState()
     const nodes = getNodes()
-    setWorkflowRunningData(produce(workflowRunningData!, (draft) => {
-      draft.tracing!.push({
-        ...data,
-        status: NodeRunningStatus.Running,
-      })
-    }))
+    const currentIndex = workflowRunningData?.tracing?.findIndex(item => item.node_id === data.node_id)
+    if (currentIndex !== undefined && currentIndex > -1) {
+      setWorkflowRunningData(produce(workflowRunningData!, (draft) => {
+        draft.tracing![currentIndex] = {
+          ...data,
+          status: NodeRunningStatus.Running,
+        }
+      }))
+    }
+    else {
+      setWorkflowRunningData(produce(workflowRunningData!, (draft) => {
+        draft.tracing!.push({
+          ...data,
+          status: NodeRunningStatus.Running,
+        })
+      }))
+    }
 
     const {
       setViewport,
     } = reactflow
     const currentNodeIndex = nodes.findIndex(node => node.id === data.node_id)
     const currentNode = nodes[currentNodeIndex]
+
+    // Skip if node not found (e.g., virtual extraction nodes)
+    if (!currentNode)
+      return
+
     const position = currentNode.position
     const zoom = transform[2]
 

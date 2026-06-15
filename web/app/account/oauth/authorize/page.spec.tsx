@@ -1,0 +1,121 @@
+import { fireEvent, render, screen } from '@testing-library/react'
+import { useLanguage } from '@/app/components/header/account-setting/model-provider-page/hooks'
+import { setPostLoginRedirect } from '@/app/signin/utils/post-login-redirect'
+import { useAppContext } from '@/context/app-context'
+import { useRouter, useSearchParams } from '@/next/navigation'
+import { useIsLogin } from '@/service/use-common'
+import { useAuthorizeOAuthApp, useOAuthAppInfo } from '@/service/use-oauth'
+import OAuthAuthorize from './page'
+
+vi.mock('next/navigation', () => ({
+  useRouter: vi.fn(),
+  useSearchParams: vi.fn(),
+}))
+
+vi.mock('@/app/components/header/account-setting/model-provider-page/hooks', () => ({
+  useLanguage: vi.fn(),
+}))
+
+vi.mock('@/context/app-context', () => ({
+  useAppContext: vi.fn(),
+}))
+
+vi.mock('@/service/use-common', () => ({
+  useIsLogin: vi.fn(),
+  useUserProfile: vi.fn().mockReturnValue({
+    data: { profile: { avatar_url: '', name: 'Dify User', email: 'dify@example.com' } },
+  }),
+}))
+
+vi.mock('@/service/use-oauth', () => ({
+  useAuthorizeOAuthApp: vi.fn(),
+  useOAuthAppInfo: vi.fn(),
+}))
+
+vi.mock('@/app/signin/utils/post-login-redirect', () => ({
+  setPostLoginRedirect: vi.fn(),
+}))
+
+const SEARCH_QUERY = 'client_id=dcfcd6a4-5799-405a-a6d7-04261b24dd02&redirect_uri=https%3A%2F%2Fcreators.dify.dev%2Fapi%2Fv1%2Foauth%2Fcallback%2Fdify&response_type=code'
+
+const expectedOAuthReturnUrl = () => {
+  const params = new URLSearchParams(SEARCH_QUERY)
+  const clientId = decodeURIComponent(params.get('client_id') || '')
+  const redirectUri = decodeURIComponent(params.get('redirect_uri') || '')
+  return `${globalThis.location.origin}/account/oauth/authorize?client_id=${encodeURIComponent(clientId)}&redirect_uri=${encodeURIComponent(redirectUri)}`
+}
+
+const createOAuthAppInfo = () => ({
+  app_label: {
+    en_US: 'Test OAuth App',
+  },
+  scope: 'read:name',
+  app_icon: '',
+})
+
+describe('OAuthAuthorize redirect persistence', () => {
+  const push = vi.fn()
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    localStorage.clear()
+
+    vi.mocked(useRouter).mockReturnValue({
+      push,
+    } as never)
+    vi.mocked(useSearchParams).mockReturnValue(new URLSearchParams(SEARCH_QUERY) as never)
+    vi.mocked(useLanguage).mockReturnValue('en_US')
+    vi.mocked(useAppContext).mockReturnValue({
+      userProfile: {
+        avatar_url: '',
+        name: 'Dify User',
+        email: 'dify@example.com',
+      },
+    } as never)
+    vi.mocked(useOAuthAppInfo).mockReturnValue({
+      data: createOAuthAppInfo(),
+      isLoading: false,
+      isError: false,
+    } as never)
+    vi.mocked(useAuthorizeOAuthApp).mockReturnValue({
+      mutateAsync: vi.fn(),
+      isPending: false,
+    } as never)
+  })
+
+  it('should set post-login redirect and navigate to signin when switch account is clicked', () => {
+    // Arrange
+    vi.mocked(useIsLogin).mockReturnValue({
+      isLoading: false,
+      data: { logged_in: true },
+    } as never)
+    render(<OAuthAuthorize />)
+    const switchAccountButton = screen.getByRole('button', { name: 'oauth.switchAccount' })
+
+    // Act
+    fireEvent.click(switchAccountButton)
+
+    // Assert
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith('/signin')
+    expect(vi.mocked(setPostLoginRedirect)).toHaveBeenCalledWith(expectedOAuthReturnUrl())
+  })
+
+  it('should set post-login redirect and navigate to signin when login button is clicked for logged-out users', () => {
+    // Arrange
+    vi.mocked(useIsLogin).mockReturnValue({
+      isLoading: false,
+      data: { logged_in: false },
+    } as never)
+    render(<OAuthAuthorize />)
+    const loginButton = screen.getByRole('button', { name: 'oauth.login' })
+
+    // Act
+    fireEvent.click(loginButton)
+
+    // Assert
+    expect(push).toHaveBeenCalledTimes(1)
+    expect(push).toHaveBeenCalledWith('/signin')
+    expect(vi.mocked(setPostLoginRedirect)).toHaveBeenCalledWith(expectedOAuthReturnUrl())
+  })
+})

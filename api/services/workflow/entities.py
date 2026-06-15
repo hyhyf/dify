@@ -98,6 +98,12 @@ class WorkflowTaskData(BaseModel):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
+class WorkflowResumeTaskData(BaseModel):
+    """Payload for workflow resumption tasks."""
+
+    workflow_run_id: str
+
+
 class AsyncTriggerExecutionResult(BaseModel):
     """Result from async trigger-based workflow execution"""
 
@@ -163,3 +169,29 @@ class WorkflowScheduleCFSPlanEntity(BaseModel):
 
     schedule_strategy: Strategy
     granularity: int = Field(default=-1)  # -1 means infinite
+
+
+# ========== Nested Node Graph Entities ==========
+
+
+class NestedNodeParameterSchema(BaseModel):
+    """Schema for the parameter to be extracted from nested node context."""
+
+    name: str = Field(description="Parameter name (e.g., 'query')")
+    type: str = Field(default="string", description="Parameter type (e.g., 'string', 'number')")
+    description: str = Field(default="", description="Parameter description for LLM")
+
+
+class NestedNodeGraphRequest(BaseModel):
+    """Request payload for generating nested node graph."""
+
+    parent_node_id: str = Field(description="ID of the parent node that uses the extracted value")
+    parameter_key: str = Field(description="Key of the parameter being extracted")
+    context_source: list[str] = Field(description="Variable selector for the context source")
+    parameter_schema: NestedNodeParameterSchema = Field(description="Schema of the parameter to extract")
+
+
+class NestedNodeGraphResponse(BaseModel):
+    """Response containing the generated nested node graph."""
+
+    graph: Mapping[str, Any] = Field(description="Complete graph structure with nodes, edges, viewport")

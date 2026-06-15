@@ -4,7 +4,7 @@ import type { NodeProps } from 'reactflow'
 import type { QuestionClassifierNodeType } from './types'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
-import Tooltip from '@/app/components/base/tooltip'
+import { Popover, PopoverContent, PopoverTrigger } from '@/app/components/base/ui/popover'
 import {
   useTextGenerationCurrentProviderAndModelAndModelList,
 } from '@/app/components/header/account-setting/model-provider-page/hooks'
@@ -31,7 +31,7 @@ const TruncatedClassItem: FC<TruncatedClassItemProps> = ({ topic, index, nodeId,
   const shouldShowTooltip = topic.name.length > MAX_CLASS_TEXT_LENGTH
 
   const content = (
-    <div className="system-xs-regular truncate text-text-tertiary">
+    <div className="truncate text-text-tertiary system-xs-regular">
       <ReadonlyInputWithSelectVar
         value={truncatedText}
         nodeId={nodeId}
@@ -42,20 +42,23 @@ const TruncatedClassItem: FC<TruncatedClassItemProps> = ({ topic, index, nodeId,
 
   return (
     <div className="flex flex-col gap-y-0.5 rounded-md bg-workflow-block-parma-bg px-[5px] py-[3px]">
-      <div className="system-2xs-semibold-uppercase uppercase text-text-secondary">
+      <div className="uppercase text-text-secondary system-2xs-semibold-uppercase">
         {`${t(`${i18nPrefix}.class`, { ns: 'workflow' })} ${index + 1}`}
       </div>
       {shouldShowTooltip
         ? (
-            <Tooltip
-              popupContent={(
+            <Popover>
+              <PopoverTrigger
+                openOnHover
+                nativeButton={false}
+                render={content}
+              />
+              <PopoverContent placement="top" popupClassName="p-2">
                 <div className="max-w-[300px] break-words">
                   <ReadonlyInputWithSelectVar value={topic.name} nodeId={nodeId} />
                 </div>
-              )}
-            >
-              {content}
-            </Tooltip>
+              </PopoverContent>
+            </Popover>
           )
         : content}
     </div>

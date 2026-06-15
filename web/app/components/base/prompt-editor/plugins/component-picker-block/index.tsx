@@ -1,6 +1,7 @@
 import type { MenuRenderFn } from '@lexical/react/LexicalTypeaheadMenuPlugin'
 import type { TextNode } from 'lexical'
 import type {
+  AgentBlockType,
   ContextBlockType,
   CurrentBlockType,
   ErrorMessageBlockType,
@@ -8,10 +9,13 @@ import type {
   HistoryBlockType,
   LastRunBlockType,
   QueryBlockType,
+  RequestURLBlockType,
   VariableBlockType,
   WorkflowVariableBlockType,
 } from '../../types'
 import type { PickerBlockMenuOption } from './menu'
+import type { AgentNode } from '@/app/components/base/prompt-editor/types'
+import type { ValueSelector } from '@/app/components/workflow/types'
 import {
   flip,
   offset,
@@ -20,19 +24,42 @@ import {
 } from '@floating-ui/react'
 import { useLexicalComposerContext } from '@lexical/react/LexicalComposerContext'
 import { LexicalTypeaheadMenuPlugin } from '@lexical/react/LexicalTypeaheadMenuPlugin'
-import { KEY_ESCAPE_COMMAND } from 'lexical'
+import { mergeRegister } from '@lexical/utils'
+import {
+  $createTextNode,
+  $getRoot,
+  $getSelection,
+  $insertNodes,
+  $isRangeSelection,
+  BLUR_COMMAND,
+  COMMAND_PRIORITY_EDITOR,
+  FOCUS_COMMAND,
+  KEY_ESCAPE_COMMAND,
+} from 'lexical'
 import {
   Fragment,
   memo,
   useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
   useState,
 } from 'react'
 import ReactDOM from 'react-dom'
+import { useTranslation } from 'react-i18next'
 import { GeneratorType } from '@/app/components/app/configuration/config/automatic/types'
+import AgentNodeList from '@/app/components/workflow/nodes/_base/components/agent-node-list'
 import VarReferenceVars from '@/app/components/workflow/nodes/_base/components/variable/var-reference-vars'
+import { FilePickerPanel } from '@/app/components/workflow/skill/editor/skill-editor/plugins/file-picker-panel'
+import FilePickerUploadModal from '@/app/components/workflow/skill/editor/skill-editor/plugins/file-picker-upload-modal'
+import { $createFileReferenceNode } from '@/app/components/workflow/skill/editor/skill-editor/plugins/file-reference-block/node'
+import { BlockEnum } from '@/app/components/workflow/types'
 import { useEventEmitterContextContext } from '@/context/event-emitter'
+import { cn } from '@/utils/classnames'
 import { useBasicTypeaheadTriggerMatch } from '../../hooks'
 import { $splitNodeContainingQuery } from '../../utils'
+import { INSERT_CONTEXT_BLOCK_COMMAND } from '../context-block'
 import { INSERT_CURRENT_BLOCK_COMMAND } from '../current-block'
 import { INSERT_ERROR_MESSAGE_BLOCK_COMMAND } from '../error-message-block'
 import { INSERT_LAST_RUN_BLOCK_COMMAND } from '../last-run-block'
@@ -44,6 +71,7 @@ type ComponentPickerProps = {
   triggerString: string
   contextBlock?: ContextBlockType
   queryBlock?: QueryBlockType
+  requestURLBlock?: RequestURLBlockType
   historyBlock?: HistoryBlockType
   variableBlock?: VariableBlockType
   externalToolBlock?: ExternalToolBlockType
@@ -51,12 +79,28 @@ type ComponentPickerProps = {
   currentBlock?: CurrentBlockType
   errorMessageBlock?: ErrorMessageBlockType
   lastRunBlock?: LastRunBlockType
+  agentBlock?: AgentBlockType
   isSupportFileVar?: boolean
+  isSupportSandbox?: boolean
 }
+
+type ReferenceSyncProps = {
+  anchor: HTMLElement | null
+  setReference: (node: HTMLElement | null) => void
+}
+
+const ReferenceSync = ({ anchor, setReference }: ReferenceSyncProps) => {
+  useLayoutEffect(() => {
+    setReference(anchor)
+  }, [anchor, setReference])
+  return null
+}
+
 const ComponentPicker = ({
   triggerString,
   contextBlock,
   queryBlock,
+  requestURLBlock,
   historyBlock,
   variableBlock,
   externalToolBlock,
@@ -64,8 +108,11 @@ const ComponentPicker = ({
   currentBlock,
   errorMessageBlock,
   lastRunBlock,
+  agentBlock,
   isSupportFileVar,
+  isSupportSandbox,
 }: ComponentPickerProps) => {
+  const { t } = useTranslation()
   const { eventEmitter } = useEventEmitterContextContext()
   const { refs, floatingStyles, isPositioned } = useFloating({
     placement: 'bottom-start',
@@ -78,12 +125,70 @@ const ComponentPicker = ({
     ],
   })
   const [editor] = useLexicalComposerContext()
+  const useExternalSearch = triggerString === '/' || triggerString === '@'
   const checkForTriggerMatch = useBasicTypeaheadTriggerMatch(triggerString, {
     minLength: 0,
-    maxLength: 0,
+    maxLength: useExternalSearch ? 75 : 0,
   })
 
+  const getMatchFromSelection = useCallback(() => {
+    const selection = $getSelection()
+    if (!$isRangeSelection(selection) || !selection.isCollapsed())
+      return null
+    const anchor = selection.anchor
+    if (anchor.type !== 'text')
+      return null
+    const anchorNode = anchor.getNode()
+    if (!anchorNode.isSimpleText())
+      return null
+    const text = anchorNode.getTextContent().slice(0, anchor.offset)
+    return checkForTriggerMatch(text, editor)
+  }, [checkForTriggerMatch, editor])
+
   const [queryString, setQueryString] = useState<string | null>(null)
+  const [activeTab, setActiveTab] = useState<'variables' | 'files'>('variables')
+  const [isFileUploadModalOpen, setIsFileUploadModalOpen] = useState(false)
+  const [fileUploadModalKey, setFileUploadModalKey] = useState(0)
+  const [blurHidden, setBlurHidden] = useState(false)
+  const blurTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  const clearBlurTimer = useCallback(() => {
+    if (blurTimerRef.current) {
+      clearTimeout(blurTimerRef.current)
+      blurTimerRef.current = null
+    }
+  }, [])
+
+  useEffect(() => {
+    const unregister = mergeRegister(
+      editor.registerCommand(
+        BLUR_COMMAND,
+        (event) => {
+          clearBlurTimer()
+          const target = event?.relatedTarget as HTMLElement
+          if (!target?.classList?.contains('var-search-input'))
+            blurTimerRef.current = setTimeout(() => setBlurHidden(true), 200)
+          return false
+        },
+        COMMAND_PRIORITY_EDITOR,
+      ),
+      editor.registerCommand(
+        FOCUS_COMMAND,
+        () => {
+          clearBlurTimer()
+          setBlurHidden(false)
+          return false
+        },
+        COMMAND_PRIORITY_EDITOR,
+      ),
+    )
+
+    return () => {
+      if (blurTimerRef.current)
+        clearTimeout(blurTimerRef.current)
+      unregister()
+    }
+  }, [editor, clearBlurTimer])
 
   eventEmitter?.useSubscription((v: any) => {
     if (v.type === INSERT_VARIABLE_VALUE_BLOCK_COMMAND)
@@ -100,9 +205,11 @@ const ComponentPicker = ({
     variableBlock,
     externalToolBlock,
     workflowVariableBlock,
+    requestURLBlock,
     currentBlock,
     errorMessageBlock,
     lastRunBlock,
+    useExternalSearch ? (queryString ?? undefined) : undefined,
   )
 
   const onSelectOption = useCallback(
@@ -122,9 +229,48 @@ const ComponentPicker = ({
     [editor],
   )
 
+  const removeTriggerText = useCallback(() => {
+    const match = getMatchFromSelection()
+    if (!match)
+      return
+
+    const nodeToRemove = $splitNodeContainingQuery(match)
+    if (nodeToRemove)
+      nodeToRemove.remove()
+  }, [getMatchFromSelection])
+
+  const insertFileReferences = useCallback((resourceIds: string[]) => {
+    if (!resourceIds.length)
+      return
+
+    editor.focus(() => {
+      editor.update(() => {
+        removeTriggerText()
+        if (!$isRangeSelection($getSelection()))
+          $getRoot().selectEnd()
+
+        const fileNodes = resourceIds.flatMap((resourceId, index) => {
+          const node = $createFileReferenceNode({ resourceId })
+          if (index === resourceIds.length - 1)
+            return [node]
+
+          return [node, $createTextNode(' ')]
+        })
+        $insertNodes(fileNodes)
+      })
+    })
+  }, [editor, removeTriggerText])
+
+  const handleSelectFileReference = useCallback((resourceId: string) => {
+    insertFileReferences([resourceId])
+  }, [insertFileReferences])
+
   const handleSelectWorkflowVariable = useCallback((variables: string[]) => {
     editor.update(() => {
-      const needRemove = $splitNodeContainingQuery(checkForTriggerMatch(triggerString, editor)!)
+      const match = getMatchFromSelection()
+      if (!match)
+        return
+      const needRemove = $splitNodeContainingQuery(match)
       if (needRemove)
         needRemove.remove()
     })
@@ -144,32 +290,213 @@ const ComponentPicker = ({
     else {
       editor.dispatchCommand(INSERT_WORKFLOW_VARIABLE_BLOCK_COMMAND, variables)
     }
-  }, [editor, currentBlock?.generatorType, checkForTriggerMatch, triggerString])
+  }, [editor, currentBlock?.generatorType, getMatchFromSelection])
 
   const handleClose = useCallback(() => {
     const escapeEvent = new KeyboardEvent('keydown', { key: 'Escape' })
     editor.dispatchCommand(KEY_ESCAPE_COMMAND, escapeEvent)
   }, [editor])
 
+  const handleSelectAssembleVariables = useCallback((): ValueSelector | null => {
+    editor.update(() => {
+      const match = getMatchFromSelection()
+      if (!match)
+        return
+      const needRemove = $splitNodeContainingQuery(match)
+      if (needRemove)
+        needRemove.remove()
+    })
+    const assembleVariables = workflowVariableBlock?.onAssembleVariables?.()
+    if (assembleVariables && assembleVariables.length)
+      editor.dispatchCommand(INSERT_WORKFLOW_VARIABLE_BLOCK_COMMAND, assembleVariables)
+    handleClose()
+    return assembleVariables ?? null
+  }, [editor, getMatchFromSelection, workflowVariableBlock, handleClose])
+
+  const handleSelectAgent = useCallback((agent: { id: string, title: string }) => {
+    editor.update(() => {
+      const match = getMatchFromSelection()
+      if (!match)
+        return
+      const needRemove = $splitNodeContainingQuery(match)
+      if (needRemove)
+        needRemove.remove()
+
+      const root = $getRoot()
+      root.selectStart()
+    })
+    editor.dispatchCommand(INSERT_WORKFLOW_VARIABLE_BLOCK_COMMAND, [agent.id, 'context'])
+    workflowVariableBlock?.onSelectAgent?.(agent)
+    agentBlock?.onSelect?.(agent)
+    editor.update(() => {
+      const root = $getRoot()
+      root.selectEnd()
+    })
+    handleClose()
+  }, [editor, getMatchFromSelection, workflowVariableBlock, agentBlock, handleClose])
+
+  const handleSelectContext = useCallback(() => {
+    if (!contextBlock?.selectable)
+      return
+    editor.update(() => {
+      const match = getMatchFromSelection()
+      if (!match)
+        return
+      const needRemove = $splitNodeContainingQuery(match)
+      if (needRemove)
+        needRemove.remove()
+    })
+    editor.dispatchCommand(INSERT_CONTEXT_BLOCK_COMMAND, undefined)
+    handleClose()
+  }, [contextBlock?.selectable, editor, getMatchFromSelection, handleClose])
+
+  const isAgentTrigger = triggerString === '@' && agentBlock?.show
+  const showAssembleVariables = triggerString === '/' && workflowVariableBlock?.showAssembleVariables && !!workflowVariableBlock?.onAssembleVariables
+  const agentNodes: AgentNode[] = useMemo(() => {
+    return workflowVariableBlock?.agentNodes || agentBlock?.agentNodes || []
+  }, [workflowVariableBlock?.agentNodes, agentBlock?.agentNodes])
+  const handleOpen = useCallback(() => {
+    if (isSupportSandbox && triggerString === '/')
+      setActiveTab('variables')
+  }, [isSupportSandbox, triggerString])
+
   const renderMenu = useCallback<MenuRenderFn<PickerBlockMenuOption>>((
     anchorElementRef,
     { options, selectedIndex, selectOptionAndCleanUp, setHighlightedIndex },
   ) => {
-    if (!(anchorElementRef.current && (allFlattenOptions.length || workflowVariableBlock?.show)))
+    if (blurHidden)
+      return null
+    if (triggerString === '@' && !agentBlock?.show)
       return null
 
-    setTimeout(() => {
-      if (anchorElementRef.current)
-        refs.setReference(anchorElementRef.current)
-    }, 0)
+    if (isAgentTrigger) {
+      if (!(anchorElementRef.current && agentNodes.length))
+        return null
+    }
+    else {
+      if (!(anchorElementRef.current && (allFlattenOptions.length || workflowVariableBlock?.show)))
+        return null
+    }
+    const isSandboxMenu = isSupportSandbox && triggerString === '/'
+
+    if (!(anchorElementRef.current && (isSandboxMenu || allFlattenOptions.length || workflowVariableBlock?.show)))
+      return null
+
+    const anchorElement = anchorElementRef.current
+
+    if (isSandboxMenu) {
+      return (
+        <>
+          <ReferenceSync anchor={anchorElement} setReference={refs.setReference} />
+          {ReactDOM.createPortal(
+            <div className="h-0 w-0">
+              <div
+                className="w-[360px] overflow-hidden rounded-xl border-[0.5px] border-components-panel-border bg-components-panel-bg-blur shadow-lg"
+                style={{
+                  ...floatingStyles,
+                  visibility: isPositioned ? 'visible' : 'hidden',
+                }}
+                ref={refs.setFloating}
+                onMouseDown={(event) => {
+                  event.preventDefault()
+                  event.stopPropagation()
+                }}
+              >
+                <div className="flex items-center gap-1 border-b border-divider-subtle px-2 py-2">
+                  <div className="flex gap-1">
+                    <div
+                      className={cn('flex h-6 cursor-pointer items-center rounded-md px-2 text-text-tertiary system-xs-medium hover:bg-state-base-hover', activeTab === 'variables' && 'bg-state-base-active text-text-primary')}
+                      onClick={() => setActiveTab('variables')}
+                    >
+                      {t('promptEditor.variable.outputToolDisabledItem.title', { ns: 'common' })}
+                    </div>
+                    <div
+                      className={cn('flex h-6 cursor-pointer items-center rounded-md px-2 text-text-tertiary system-xs-medium hover:bg-state-base-hover', activeTab === 'files' && 'bg-state-base-active text-text-primary')}
+                      onClick={() => setActiveTab('files')}
+                    >
+                      {t('nodes.llm.files', { ns: 'workflow' })}
+                    </div>
+                  </div>
+                </div>
+                <div className="p-1">
+                  {activeTab === 'variables' && (
+                    <>
+                      <VarReferenceVars
+                        searchBoxClassName="mt-1"
+                        vars={workflowVariableOptions}
+                        onChange={(variables: string[]) => {
+                          handleSelectWorkflowVariable(variables)
+                          handleClose()
+                        }}
+                        maxHeightClass="max-h-[34vh]"
+                        isSupportFileVar={isSupportFileVar}
+                        onClose={handleClose}
+                        onBlur={handleClose}
+                        showManageInputField={workflowVariableBlock?.showManageInputField}
+                        onManageInputField={workflowVariableBlock?.onManageInputField}
+                        hideSearch={useExternalSearch}
+                        externalSearchText={useExternalSearch ? (queryString ?? '') : undefined}
+                        enableKeyboardNavigation={useExternalSearch}
+                        autoFocus={false}
+                        isInCodeGeneratorInstructionEditor={currentBlock?.generatorType === GeneratorType.code}
+                      />
+                      {contextBlock?.show && (
+                        <div className="mt-1 border-t border-divider-subtle pt-1">
+                          <button
+                            type="button"
+                            disabled={!contextBlock.selectable}
+                            className={cn(
+                              'flex h-6 w-full items-center rounded-md px-3 hover:bg-state-base-hover',
+                              contextBlock.selectable
+                                ? ''
+                                : 'cursor-not-allowed opacity-30',
+                            )}
+                            onClick={handleSelectContext}
+                            onMouseDown={e => e.preventDefault()}
+                          >
+                            <span className="i-custom-vender-solid-files-file-05 h-4 w-4 shrink-0 text-[#6938EF]" />
+                            <span className="ml-1 truncate text-[13px] text-text-secondary">
+                              {t('promptEditor.context.item.title', { ns: 'common' })}
+                            </span>
+                          </button>
+                        </div>
+                      )}
+                    </>
+                  )}
+                  {activeTab === 'files' && (
+                    <FilePickerPanel
+                      onSelectNode={(node) => {
+                        handleSelectFileReference(node.id)
+                        handleClose()
+                      }}
+                      className="w-full border-0 bg-transparent p-0 shadow-none"
+                      contentClassName="px-1"
+                      showHeader={false}
+                      showAddFiles
+                      onAddFiles={() => {
+                        editor.update(() => {
+                          removeTriggerText()
+                        })
+                        setFileUploadModalKey(key => key + 1)
+                        setIsFileUploadModalOpen(true)
+                        handleClose()
+                      }}
+                    />
+                  )}
+                </div>
+              </div>
+            </div>,
+            anchorElement,
+          )}
+        </>
+      )
+    }
 
     return (
       <>
+        <ReferenceSync anchor={anchorElement} setReference={refs.setReference} />
         {
           ReactDOM.createPortal(
-            // The `LexicalMenu` will try to calculate the position of the floating menu based on the first child.
-            // Since we use floating ui, we need to wrap it with a div to prevent the position calculation being affected.
-            // See https://github.com/facebook/lexical/blob/ac97dfa9e14a73ea2d6934ff566282d7f758e8bb/packages/lexical-react/src/shared/LexicalMenu.ts#L493
             <div className="h-0 w-0">
               <div
                 className="w-[260px] rounded-lg border-[0.5px] border-components-panel-border bg-components-panel-bg-blur p-1 shadow-lg"
@@ -179,79 +506,122 @@ const ComponentPicker = ({
                 }}
                 ref={refs.setFloating}
               >
-                {
-                  workflowVariableBlock?.show && (
-                    <div className="p-1">
-                      <VarReferenceVars
-                        searchBoxClassName="mt-1"
-                        vars={workflowVariableOptions}
-                        onChange={(variables: string[]) => {
-                          handleSelectWorkflowVariable(variables)
-                        }}
-                        maxHeightClass="max-h-[34vh]"
-                        isSupportFileVar={isSupportFileVar}
-                        onClose={handleClose}
-                        onBlur={handleClose}
-                        showManageInputField={workflowVariableBlock.showManageInputField}
-                        onManageInputField={workflowVariableBlock.onManageInputField}
-                        autoFocus={false}
-                        isInCodeGeneratorInstructionEditor={currentBlock?.generatorType === GeneratorType.code}
-                      />
-                    </div>
-                  )
-                }
-                {
-                  workflowVariableBlock?.show && !!options.length && (
-                    <div className="my-1 h-px w-full -translate-x-1 bg-divider-subtle"></div>
-                  )
-                }
-                <div>
-                  {
-                    options.map((option, index) => (
-                      <Fragment key={option.key}>
+                {isAgentTrigger
+                  ? (
+                      <div>
+                        <div className="mx-auto flex w-fit items-center py-1 text-text-tertiary system-xs-medium-uppercase">
+                          {t('nodes.tool.agentPopupHeader', { ns: 'workflow' })}
+                        </div>
+                        <AgentNodeList
+                          nodes={agentNodes.map(node => ({
+                            ...node,
+                            type: BlockEnum.Agent || BlockEnum.LLM,
+                          }))}
+                          onSelect={handleSelectAgent}
+                          onClose={handleClose}
+                          onBlur={handleClose}
+                          maxHeightClass="max-h-[34vh]"
+                          autoFocus={false}
+                          hideSearch={useExternalSearch}
+                          externalSearchText={useExternalSearch ? (queryString ?? '') : undefined}
+                          enableKeyboardNavigation={useExternalSearch}
+                        />
+                      </div>
+                    )
+                  : (
+                      <>
                         {
-                          // Divider
-                          index !== 0 && options.at(index - 1)?.group !== option.group && (
+                          workflowVariableBlock?.show && (
+                            <div className="p-1">
+                              <VarReferenceVars
+                                searchBoxClassName="mt-1"
+                                vars={workflowVariableOptions}
+                                onChange={(variables: string[]) => {
+                                  handleSelectWorkflowVariable(variables)
+                                }}
+                                maxHeightClass="max-h-[34vh]"
+                                isSupportFileVar={isSupportFileVar}
+                                onClose={handleClose}
+                                onBlur={handleClose}
+                                showManageInputField={workflowVariableBlock.showManageInputField}
+                                onManageInputField={workflowVariableBlock.onManageInputField}
+                                agentNodes={triggerString === '/' ? workflowVariableBlock.agentNodes : undefined}
+                                onSelectAgent={triggerString === '/' && workflowVariableBlock.agentNodes?.length ? handleSelectAgent : undefined}
+                                showAssembleVariables={showAssembleVariables}
+                                onAssembleVariables={showAssembleVariables ? handleSelectAssembleVariables : undefined}
+                                autoFocus={false}
+                                isInCodeGeneratorInstructionEditor={currentBlock?.generatorType === GeneratorType.code}
+                                hideSearch={useExternalSearch}
+                                externalSearchText={useExternalSearch ? (queryString ?? '') : undefined}
+                                enableKeyboardNavigation={useExternalSearch}
+                              />
+                            </div>
+                          )
+                        }
+                        {
+                          workflowVariableBlock?.show && !!options.length && (
                             <div className="my-1 h-px w-full -translate-x-1 bg-divider-subtle"></div>
                           )
                         }
-                        {option.renderMenuOption({
-                          queryString,
-                          isSelected: selectedIndex === index,
-                          onSelect: () => {
-                            selectOptionAndCleanUp(option)
-                          },
-                          onSetHighlight: () => {
-                            setHighlightedIndex(index)
-                          },
-                        })}
-                      </Fragment>
-                    ))
-                  }
-                </div>
+                        <div>
+                          {
+                            options.map((option, index) => (
+                              <Fragment key={option.key}>
+                                {
+                                  index !== 0 && options.at(index - 1)?.group !== option.group && (
+                                    <div className="my-1 h-px w-full -translate-x-1 bg-divider-subtle"></div>
+                                  )
+                                }
+                                {option.renderMenuOption({
+                                  queryString,
+                                  isSelected: selectedIndex === index,
+                                  onSelect: () => {
+                                    selectOptionAndCleanUp(option)
+                                  },
+                                  onSetHighlight: () => {
+                                    setHighlightedIndex(index)
+                                  },
+                                })}
+                              </Fragment>
+                            ))
+                          }
+                        </div>
+                      </>
+                    )}
               </div>
             </div>,
-            anchorElementRef.current,
+            anchorElement,
           )
         }
       </>
     )
-  }, [allFlattenOptions.length, workflowVariableBlock?.show, floatingStyles, isPositioned, refs, workflowVariableOptions, isSupportFileVar, handleClose, currentBlock?.generatorType, handleSelectWorkflowVariable, queryString, workflowVariableBlock?.showManageInputField, workflowVariableBlock?.onManageInputField])
+  }, [isAgentTrigger, blurHidden, isSupportSandbox, triggerString, allFlattenOptions.length, workflowVariableBlock?.show, workflowVariableBlock?.showManageInputField, workflowVariableBlock?.onManageInputField, workflowVariableBlock?.agentNodes, floatingStyles, isPositioned, refs, agentNodes, handleSelectAgent, handleClose, useExternalSearch, queryString, workflowVariableOptions, isSupportFileVar, showAssembleVariables, handleSelectAssembleVariables, currentBlock?.generatorType, t, activeTab, handleSelectWorkflowVariable, handleSelectFileReference, contextBlock?.show, contextBlock?.selectable, handleSelectContext, agentBlock?.show, editor, removeTriggerText])
 
   return (
-    <LexicalTypeaheadMenuPlugin
-      options={allFlattenOptions}
-      onQueryChange={setQueryString}
-      onSelectOption={onSelectOption}
-      // The `translate` class is used to workaround the issue that the `typeahead-menu` menu is not positioned as expected.
-      // See also https://github.com/facebook/lexical/blob/772520509308e8ba7e4a82b6cd1996a78b3298d0/packages/lexical-react/src/shared/LexicalMenu.ts#L498
-      //
-      // We no need the position function of the `LexicalTypeaheadMenuPlugin`,
-      // so the reference anchor should be positioned based on the range of the trigger string, and the menu will be positioned by the floating ui.
-      anchorClassName="z-[999999] translate-y-[calc(-100%-3px)]"
-      menuRenderFn={renderMenu}
-      triggerFn={checkForTriggerMatch}
-    />
+    <>
+      <LexicalTypeaheadMenuPlugin
+        options={(isSupportSandbox && triggerString === '/') ? [] : allFlattenOptions}
+        onQueryChange={setQueryString}
+        onSelectOption={onSelectOption}
+        onOpen={handleOpen}
+        // The `translate` class is used to workaround the issue that the `typeahead-menu` menu is not positioned as expected.
+        // See also https://github.com/facebook/lexical/blob/772520509308e8ba7e4a82b6cd1996a78b3298d0/packages/lexical-react/src/shared/LexicalMenu.ts#L498
+        //
+        // We no need the position function of the `LexicalTypeaheadMenuPlugin`,
+        // so the reference anchor should be positioned based on the range of the trigger string, and the menu will be positioned by the floating ui.
+        anchorClassName="z-[999999] translate-y-[calc(-100%-3px)]"
+        menuRenderFn={renderMenu}
+        triggerFn={checkForTriggerMatch}
+      />
+      {isSupportSandbox && isFileUploadModalOpen && (
+        <FilePickerUploadModal
+          key={fileUploadModalKey}
+          isOpen={isFileUploadModalOpen}
+          onClose={() => setIsFileUploadModalOpen(false)}
+          onUploadedFiles={insertFileReferences}
+        />
+      )}
+    </>
   )
 }
 

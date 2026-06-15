@@ -1,14 +1,14 @@
 'use client'
 import type { MailRegisterResponse } from '@/service/use-common'
 import Cookies from 'js-cookie'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { trackEvent } from '@/app/components/base/amplitude'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { validPassword } from '@/config'
+import { useRouter, useSearchParams } from '@/next/navigation'
 import { useMailRegister } from '@/service/use-common'
 import { cn } from '@/utils/classnames'
 import { sendGAEvent } from '@/utils/gtag'
@@ -37,10 +37,7 @@ const ChangePasswordForm = () => {
   const { mutateAsync: register, isPending } = useMailRegister()
 
   const showErrorMessage = useCallback((message: string) => {
-    Toast.notify({
-      type: 'error',
-      message,
-    })
+    toast.error(message)
   }, [])
 
   const valid = useCallback(() => {
@@ -82,10 +79,7 @@ const ChangePasswordForm = () => {
         })
         Cookies.remove('utm_info') // Clean up: remove utm_info cookie
 
-        Toast.notify({
-          type: 'success',
-          message: t('api.actionSuccess', { ns: 'common' }),
-        })
+        toast.success(t('api.actionSuccess', { ns: 'common' }))
         router.replace('/apps')
       }
     }
@@ -105,10 +99,10 @@ const ChangePasswordForm = () => {
     >
       <div className="flex flex-col md:w-[400px]">
         <div className="mx-auto w-full">
-          <h2 className="title-4xl-semi-bold text-text-primary">
+          <h2 className="text-text-primary title-4xl-semi-bold">
             {t('changePassword', { ns: 'login' })}
           </h2>
-          <p className="body-md-regular mt-2 text-text-secondary">
+          <p className="mt-2 text-text-secondary body-md-regular">
             {t('changePasswordTip', { ns: 'login' })}
           </p>
         </div>
@@ -117,7 +111,7 @@ const ChangePasswordForm = () => {
           <div>
             {/* Password */}
             <div className="mb-5">
-              <label htmlFor="password" className="system-md-semibold my-2 text-text-secondary">
+              <label htmlFor="password" className="my-2 text-text-secondary system-md-semibold">
                 {t('account.newPassword', { ns: 'common' })}
               </label>
               <div className="relative mt-1">
@@ -130,11 +124,11 @@ const ChangePasswordForm = () => {
                 />
 
               </div>
-              <div className="body-xs-regular mt-1 text-text-secondary">{t('error.passwordInvalid', { ns: 'login' })}</div>
+              <div className="mt-1 text-text-secondary body-xs-regular">{t('error.passwordInvalid', { ns: 'login' })}</div>
             </div>
             {/* Confirm Password */}
             <div className="mb-5">
-              <label htmlFor="confirmPassword" className="system-md-semibold my-2 text-text-secondary">
+              <label htmlFor="confirmPassword" className="my-2 text-text-secondary system-md-semibold">
                 {t('account.confirmPassword', { ns: 'common' })}
               </label>
               <div className="relative mt-1">

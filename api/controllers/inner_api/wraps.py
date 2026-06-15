@@ -5,13 +5,14 @@ from hashlib import sha1
 from hmac import new as hmac_new
 from typing import ParamSpec, TypeVar
 
-P = ParamSpec("P")
-R = TypeVar("R")
 from flask import abort, request
 
 from configs import dify_config
 from extensions.ext_database import db
 from models.model import EndUser
+
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
 def billing_inner_api_only(view: Callable[P, R]):
@@ -75,7 +76,7 @@ def enterprise_inner_api_user_auth(view: Callable[P, R]):
         if signature_base64 != token:
             return view(*args, **kwargs)
 
-        kwargs["user"] = db.session.query(EndUser).where(EndUser.id == user_id).first()
+        kwargs["user"] = db.session.get(EndUser, user_id)
 
         return view(*args, **kwargs)
 
@@ -88,11 +89,11 @@ def plugin_inner_api_only(view: Callable[P, R]):
         if not dify_config.PLUGIN_DAEMON_KEY:
             abort(404)
 
-        # get header 'X-Inner-Api-Key'
+        # validate using inner api key
         inner_api_key = request.headers.get("X-Inner-Api-Key")
-        if not inner_api_key or inner_api_key != dify_config.INNER_API_KEY_FOR_PLUGIN:
-            abort(404)
+        if inner_api_key and inner_api_key == dify_config.INNER_API_KEY_FOR_PLUGIN:
+            return view(*args, **kwargs)
 
-        return view(*args, **kwargs)
+        abort(401)
 
     return decorated

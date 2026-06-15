@@ -2,6 +2,7 @@
 import type { FC } from 'react'
 import type {
   AgentLogItemWithChildren,
+  LLMTraceItem,
   NodeTracing,
 } from '@/types/workflow'
 import { useTranslation } from 'react-i18next'
@@ -15,6 +16,7 @@ import { RetryLogTrigger } from '@/app/components/workflow/run/retry-log'
 import { BlockEnum } from '@/app/components/workflow/types'
 import { hasRetryNode } from '@/app/components/workflow/utils'
 import LargeDataAlert from '../variable-inspect/large-data-alert'
+import { LLMLogTrigger } from './llm-log'
 import MetaData from './meta'
 import StatusPanel from './status'
 
@@ -41,10 +43,12 @@ export type ResultPanelProps = {
   exceptionCounts?: number
   execution_metadata?: any
   isListening?: boolean
+  workflowRunId?: string
   handleShowIterationResultList?: (detail: NodeTracing[][], iterDurationMap: any) => void
   handleShowLoopResultList?: (detail: NodeTracing[][], loopDurationMap: any) => void
   onShowRetryDetail?: (detail: NodeTracing[]) => void
   handleShowAgentOrToolLog?: (detail?: AgentLogItemWithChildren) => void
+  onShowLLMDetail?: (detail: LLMTraceItem[]) => void
 }
 
 const ResultPanel: FC<ResultPanelProps> = ({
@@ -67,10 +71,12 @@ const ResultPanel: FC<ResultPanelProps> = ({
   exceptionCounts,
   execution_metadata,
   isListening = false,
+  workflowRunId,
   handleShowIterationResultList,
   handleShowLoopResultList,
   onShowRetryDetail,
   handleShowAgentOrToolLog,
+  onShowLLMDetail,
 }) => {
   const { t } = useTranslation()
   const isIterationNode = nodeInfo?.node_type === BlockEnum.Iteration && !!nodeInfo?.details?.length
@@ -78,6 +84,7 @@ const ResultPanel: FC<ResultPanelProps> = ({
   const isRetryNode = hasRetryNode(nodeInfo?.node_type) && !!nodeInfo?.retryDetail?.length
   const isAgentNode = nodeInfo?.node_type === BlockEnum.Agent && !!nodeInfo?.agentLog?.length
   const isToolNode = nodeInfo?.node_type === BlockEnum.Tool && !!nodeInfo?.agentLog?.length
+  const isLLMNode = nodeInfo?.node_type === BlockEnum.LLM && !!nodeInfo?.execution_metadata?.llm_trace?.length
 
   return (
     <div className="bg-components-panel-bg py-2">
@@ -89,6 +96,7 @@ const ResultPanel: FC<ResultPanelProps> = ({
           error={error}
           exceptionCounts={exceptionCounts}
           isListening={isListening}
+          workflowRunId={workflowRunId}
         />
       </div>
       <div className="px-4">
@@ -113,6 +121,14 @@ const ResultPanel: FC<ResultPanelProps> = ({
             <RetryLogTrigger
               nodeInfo={nodeInfo}
               onShowRetryResultList={onShowRetryDetail}
+            />
+          )
+        }
+        {
+          isLLMNode && onShowLLMDetail && (
+            <LLMLogTrigger
+              nodeInfo={nodeInfo}
+              onShowLLMDetail={onShowLLMDetail}
             />
           )
         }

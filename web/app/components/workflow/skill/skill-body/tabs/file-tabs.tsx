@@ -1,0 +1,147 @@
+'use client'
+
+import * as React from 'react'
+import { useCallback, useState } from 'react'
+import { useTranslation } from 'react-i18next'
+import {
+  AlertDialog,
+  AlertDialogActions,
+  AlertDialogCancelButton,
+  AlertDialogConfirmButton,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+} from '@/app/components/base/ui/alert-dialog'
+import { useStore, useWorkflowStore } from '@/app/components/workflow/store'
+import { cn } from '@/utils/classnames'
+import { getArtifactPath, isArtifactTab, START_TAB_ID } from '../../constants'
+import { useSkillAssetNodeMap } from '../../hooks/file-tree/data/use-skill-asset-tree'
+import { getFileExtension } from '../../utils/file-utils'
+import FileTabItem from './file-tab-item'
+import StartTabItem from './start-tab-item'
+
+const FileTabs = () => {
+  const { t } = useTranslation('workflow')
+  const openTabIds = useStore(s => s.openTabIds)
+  const activeTabId = useStore(s => s.activeTabId)
+  const previewTabId = useStore(s => s.previewTabId)
+  const dirtyContents = useStore(s => s.dirtyContents)
+  const dirtyMetadataIds = useStore(s => s.dirtyMetadataIds)
+  const storeApi = useWorkflowStore()
+  const { data: nodeMap } = useSkillAssetNodeMap()
+
+  const isStartTabActive = activeTabId === START_TAB_ID
+  const isStartTabOnly = openTabIds.length === 0
+
+  const handleStartTabClick = useCallback(() => {
+    storeApi.getState().activateTab(START_TAB_ID)
+  }, [storeApi])
+
+  const [pendingCloseId, setPendingCloseId] = useState<string | null>(null)
+
+  const handleTabClick = useCallback((fileId: string) => {
+    storeApi.getState().activateTab(fileId)
+  }, [storeApi])
+
+  const handleTabDoubleClick = useCallback((fileId: string) => {
+    storeApi.getState().pinTab(fileId)
+  }, [storeApi])
+
+  const closeTab = useCallback((fileId: string) => {
+    if (isArtifactTab(fileId))
+      storeApi.getState().clearArtifactSelection()
+    storeApi.getState().closeTab(fileId)
+    storeApi.getState().clearDraftContent(fileId)
+    storeApi.getState().clearFileMetadata(fileId)
+  }, [storeApi])
+
+  const handleTabClose = useCallback((fileId: string) => {
+    if (dirtyContents.has(fileId) || dirtyMetadataIds.has(fileId)) {
+      setPendingCloseId(fileId)
+      return
+    }
+    closeTab(fileId)
+  }, [dirtyContents, dirtyMetadataIds, closeTab])
+
+  const handleConfirmClose = useCallback(() => {
+    if (pendingCloseId) {
+      closeTab(pendingCloseId)
+      setPendingCloseId(null)
+    }
+  }, [pendingCloseId, closeTab])
+
+  const handleCancelClose = useCallback(() => {
+    setPendingCloseId(null)
+  }, [])
+
+  const handleUnsavedDialogOpenChange = useCallback((open: boolean) => {
+    if (!open)
+      handleCancelClose()
+  }, [handleCancelClose])
+
+  return (
+    <>
+      <div
+        className={cn(
+          'flex items-center overflow-hidden rounded-t-lg',
+          isStartTabOnly
+            ? 'bg-components-panel-bg'
+            : 'border-b border-components-panel-border-subtle bg-components-panel-bg-alt',
+        )}
+      >
+        <StartTabItem
+          isActive={isStartTabActive}
+          isOnly={isStartTabOnly}
+          onClick={handleStartTabClick}
+        />
+        {openTabIds.map((fileId) => {
+          const isArtifact = isArtifactTab(fileId)
+          const node = isArtifact ? undefined : nodeMap?.get(fileId)
+          const artifactFileName = isArtifact ? getArtifactPath(fileId).split('/').pop()! : undefined
+          const name = isArtifact ? artifactFileName! : (node?.name ?? fileId)
+          const extension = isArtifact ? getFileExtension(artifactFileName!) : node?.extension
+          const isActive = activeTabId === fileId
+          const isDirty = dirtyContents.has(fileId) || dirtyMetadataIds.has(fileId)
+          const isPreview = previewTabId === fileId
+
+          return (
+            <FileTabItem
+              key={fileId}
+              fileId={fileId}
+              name={name}
+              extension={extension}
+              isActive={isActive}
+              isDirty={isDirty}
+              isPreview={isPreview}
+              onClick={handleTabClick}
+              onClose={handleTabClose}
+              onDoubleClick={handleTabDoubleClick}
+            />
+          )
+        })}
+      </div>
+      <AlertDialog open={pendingCloseId !== null} onOpenChange={handleUnsavedDialogOpenChange}>
+        <AlertDialogContent backdropProps={{ forceRender: true }}>
+          <div className="flex flex-col gap-2 px-6 pb-4 pt-6">
+            <AlertDialogTitle title={t('skillSidebar.unsavedChanges.title')} className="w-full text-text-primary title-2xl-semi-bold">
+              {t('skillSidebar.unsavedChanges.title')}
+            </AlertDialogTitle>
+            <AlertDialogDescription className="w-full whitespace-pre-wrap text-text-tertiary system-md-regular">
+              {t('skillSidebar.unsavedChanges.content')}
+            </AlertDialogDescription>
+          </div>
+          <AlertDialogActions>
+            <AlertDialogCancelButton>
+              {t('operation.cancel', { ns: 'common' })}
+            </AlertDialogCancelButton>
+            <AlertDialogConfirmButton onClick={handleConfirmClose}>
+              {t('skillSidebar.unsavedChanges.confirmClose')}
+            </AlertDialogConfirmButton>
+          </AlertDialogActions>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  )
+}
+
+export default React.memo(FileTabs)

@@ -9,7 +9,7 @@ import * as React from 'react'
 import { useCallback, useEffect, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { Mcp } from '@/app/components/base/icons/src/vender/other'
-import { useMCPToolAvailability } from '@/app/components/workflow/nodes/_base/components/mcp-tool-availability'
+import { useMCPToolAvailability } from '@/app/components/workflow/block-selector/context/mcp-tool-availability-context'
 import { useGetLanguage } from '@/context/i18n'
 import useTheme from '@/hooks/use-theme'
 import { Theme } from '@/types/app'
@@ -40,6 +40,7 @@ type Props = {
   onSelectMultiple?: (type: BlockEnum, tools: ToolDefaultValue[]) => void
   selectedTools?: ToolValue[]
   isShowLetterIndex?: boolean
+  hideSelectedInfo?: boolean
 }
 
 const Tool: FC<Props> = ({
@@ -51,6 +52,7 @@ const Tool: FC<Props> = ({
   canNotSelectMultiple,
   onSelectMultiple,
   selectedTools,
+  hideSelectedInfo,
 }) => {
   const { t } = useTranslation()
   const { allowed: isMCPToolAllowed } = useMCPToolAvailability()
@@ -91,7 +93,7 @@ const Tool: FC<Props> = ({
   const notShowProviderSelectInfo = useMemo(() => {
     if (isAllSelected) {
       return (
-        <span className="system-xs-regular text-text-tertiary">
+        <span className="text-text-tertiary system-xs-regular">
           {t('addToolModal.added', { ns: 'tools' })}
         </span>
       )
@@ -101,7 +103,7 @@ const Tool: FC<Props> = ({
     if (isHovering && !isAllSelected) {
       return (
         <span
-          className="system-xs-regular text-components-button-secondary-accent-text"
+          className="text-components-button-secondary-accent-text system-xs-regular"
           onClick={() => {
             onSelectMultiple?.(BlockEnum.Tool, actions.filter(action => !getIsDisabled(action)).map((tool) => {
               const params: Record<string, string> = {}
@@ -138,7 +140,7 @@ const Tool: FC<Props> = ({
       return <></>
 
     return (
-      <span className="system-xs-regular text-text-tertiary">
+      <span className="text-text-tertiary system-xs-regular">
         {isAllSelected
           ? t('tabs.allAdded', { ns: 'workflow' })
           : `${selectedToolsNum} / ${totalToolsNum}`}
@@ -179,6 +181,7 @@ const Tool: FC<Props> = ({
       <div className={cn(className)}>
         <div
           className="group/item flex w-full cursor-pointer select-none items-center justify-between rounded-lg pl-3 pr-1 hover:bg-state-base-hover"
+          data-tool-picker-item="true"
           onClick={() => {
             if (hasAction) {
               setFold(!isFold)
@@ -219,14 +222,14 @@ const Tool: FC<Props> = ({
             <div className="ml-2 flex w-0 grow items-center text-sm text-text-primary">
               <span className="max-w-[250px] truncate">{notShowProvider ? actions[0]?.label[language] : payload.label[language]}</span>
               {isFlatView && groupName && (
-                <span className="system-xs-regular ml-2 shrink-0 text-text-quaternary">{groupName}</span>
+                <span className="ml-2 shrink-0 text-text-quaternary system-xs-regular">{groupName}</span>
               )}
               {isMCPTool && <Mcp className="ml-2 size-3.5 shrink-0 text-text-quaternary" />}
             </div>
           </div>
 
           <div className="ml-2 flex items-center">
-            {!isShowCanNotChooseMCPTip && !canNotSelectMultiple && (notShowProvider ? notShowProviderSelectInfo : selectedInfo)}
+            {!isShowCanNotChooseMCPTip && !canNotSelectMultiple && (notShowProvider ? notShowProviderSelectInfo : (!hideSelectedInfo && selectedInfo))}
             {isShowCanNotChooseMCPTip && <McpToolNotSupportTooltip />}
             {hasAction && (
               <FoldIcon className={cn('h-4 w-4 shrink-0 text-text-tertiary group-hover/item:text-text-tertiary', isFold && 'text-text-quaternary')} />

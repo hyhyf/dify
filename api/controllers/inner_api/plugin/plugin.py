@@ -4,8 +4,6 @@ from controllers.console.wraps import setup_required
 from controllers.inner_api import inner_api_ns
 from controllers.inner_api.plugin.wraps import get_user_tenant, plugin_data
 from controllers.inner_api.wraps import plugin_inner_api_only
-from core.file.helpers import get_signed_file_url_for_plugin
-from core.model_runtime.utils.encoders import jsonable_encoder
 from core.plugin.backwards_invocation.app import PluginAppBackwardsInvocation
 from core.plugin.backwards_invocation.base import BaseBackwardsInvocationResponse
 from core.plugin.backwards_invocation.encrypt import PluginEncrypter
@@ -30,6 +28,8 @@ from core.plugin.entities.request import (
     RequestRequestUploadFile,
 )
 from core.tools.entities.tool_entities import ToolProviderType
+from dify_graph.file.helpers import get_signed_file_url_for_plugin
+from dify_graph.model_runtime.utils.encoders import jsonable_encoder
 from libs.helper import length_prefixed_response
 from models import Account, Tenant
 from models.model import EndUser
@@ -448,3 +448,53 @@ class PluginFetchAppInfoApi(Resource):
         return BaseBackwardsInvocationResponse(
             data=PluginAppBackwardsInvocation.fetch_app_info(payload.app_id, tenant_model.id)
         ).model_dump()
+
+
+@inner_api_ns.route("/fetch/tools/list")
+class PluginFetchToolsListApi(Resource):
+    @get_user_tenant
+    @setup_required
+    @plugin_inner_api_only
+    @inner_api_ns.doc("plugin_fetch_tools_list")
+    @inner_api_ns.doc(description="Fetch all available tools through plugin interface")
+    @inner_api_ns.doc(
+        responses={
+            200: "Tools list retrieved successfully",
+            401: "Unauthorized - invalid API key",
+            404: "Service not available",
+        }
+    )
+    def post(self, user_model: Account | EndUser, tenant_model: Tenant):
+        from sqlalchemy.orm import Session
+
+        from extensions.ext_database import db
+        from services.tools.api_tools_manage_service import ApiToolManageService
+        from services.tools.builtin_tools_manage_service import BuiltinToolManageService
+        from services.tools.mcp_tools_manage_service import MCPToolManageService
+        from services.tools.workflow_tools_manage_service import WorkflowToolManageService
+
+        providers = []
+
+        # Get builtin tools
+        builtin_providers = BuiltinToolManageService.list_builtin_tools(user_model.id, tenant_model.id)
+        for provider in builtin_providers:
+            providers.append(provider.to_dict())
+
+        # Get API tools
+        api_providers = ApiToolManageService.list_api_tools(tenant_model.id)
+        for provider in api_providers:
+            providers.append(provider.to_dict())
+
+        # Get workflow tools
+        workflow_providers = WorkflowToolManageService.list_tenant_workflow_tools(user_model.id, tenant_model.id)
+        for provider in workflow_providers:
+            providers.append(provider.to_dict())
+
+        # Get MCP tools
+        with Session(db.engine) as session:
+            mcp_service = MCPToolManageService(session)
+            mcp_providers = mcp_service.list_providers(tenant_id=tenant_model.id, for_list=True)
+            for provider in mcp_providers:
+                providers.append(provider.to_dict())
+
+        return BaseBackwardsInvocationResponse(data={"providers": providers}).model_dump()

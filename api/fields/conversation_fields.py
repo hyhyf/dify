@@ -5,7 +5,7 @@ from typing import Any, TypeAlias
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
-from core.file import File
+from dify_graph.file import File
 
 JSONValue: TypeAlias = Any
 
@@ -169,6 +169,7 @@ class MessageDetail(ResponseModel):
     status: str
     error: str | None = None
     parent_message_id: str | None = None
+    generation_detail: JSONValue | None = Field(default=None, validation_alias="generation_detail_dict")
 
     @field_validator("inputs", mode="before")
     @classmethod
@@ -192,6 +193,7 @@ class StatusCount(ResponseModel):
     success: int
     failed: int
     partial_success: int
+    paused: int
 
 
 class ModelConfig(ResponseModel):

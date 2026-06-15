@@ -7,7 +7,6 @@ import type { FC } from 'react'
 import type { Node } from 'reactflow'
 import type { ToolValue } from '@/app/components/workflow/block-selector/types'
 import type { NodeOutPutVar } from '@/app/components/workflow/types'
-import Link from 'next/link'
 import * as React from 'react'
 import { useTranslation } from 'react-i18next'
 import {
@@ -16,15 +15,17 @@ import {
   PortalToFollowElemTrigger,
 } from '@/app/components/base/portal-to-follow-elem'
 import { CollectionType } from '@/app/components/tools/types'
+import Link from '@/next/link'
 import { cn } from '@/utils/classnames'
 import {
   ToolAuthorizationSection,
   ToolBaseForm,
   ToolItem,
-  ToolSettingsPanel,
+  // ToolSettingsPanel,
   ToolTrigger,
 } from './components'
 import { useToolSelectorState } from './hooks/use-tool-selector-state'
+import ToolSettingsSection from './sections/tool-settings-section'
 
 type Props = {
   disabled?: boolean
@@ -79,27 +80,17 @@ const ToolSelector: FC<Props> = ({
     setIsShow,
     isShowChooseTool,
     setIsShowChooseTool,
-    currType,
-    setCurrType,
     currentProvider,
     currentTool,
-    settingsFormSchemas,
-    paramsFormSchemas,
-    showTabSlider,
-    userSettingsOnly,
-    reasoningConfigOnly,
     manifestIcon,
     inMarketPlace,
     manifest,
     handleSelectTool,
     handleSelectMultipleTool,
     handleDescriptionChange,
-    handleSettingsFormChange,
-    handleParamsFormChange,
     handleEnabledChange,
     handleAuthorizationItemClick,
     handleInstall,
-    getSettingsValue,
   } = state
 
   const handleTriggerClick = () => {
@@ -192,7 +183,7 @@ const ToolSelector: FC<Props> = ({
         )}
         >
           {/* Header */}
-          <div className="system-xl-semibold px-4 pb-1 pt-3.5 text-text-primary">
+          <div className="px-4 pb-1 pt-3.5 text-text-primary system-xl-semibold">
             {t(`detailPanel.toolSelector.${isEdit ? 'toolSetting' : 'title'}`, { ns: 'plugin' })}
           </div>
 
@@ -221,22 +212,14 @@ const ToolSelector: FC<Props> = ({
           />
 
           {/* Settings panel */}
-          <ToolSettingsPanel
-            value={value}
+          <ToolSettingsSection
             currentProvider={currentProvider}
+            currentTool={currentTool}
+            value={value}
             nodeId={nodeId}
-            currType={currType}
-            settingsFormSchemas={settingsFormSchemas}
-            paramsFormSchemas={paramsFormSchemas}
-            settingsValue={getSettingsValue()}
-            showTabSlider={showTabSlider}
-            userSettingsOnly={userSettingsOnly}
-            reasoningConfigOnly={reasoningConfigOnly}
             nodeOutputVars={nodeOutputVars}
             availableNodes={availableNodes}
-            onCurrTypeChange={setCurrType}
-            onSettingsFormChange={handleSettingsFormChange}
-            onParamsFormChange={handleParamsFormChange}
+            onChange={onSelect}
           />
         </div>
       </PortalToFollowElemContent>

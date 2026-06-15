@@ -1,13 +1,13 @@
 'use client'
 import { RiCheckboxCircleFill } from '@remixicon/react'
 import { useCountDown } from 'ahooks'
-import { useRouter, useSearchParams } from 'next/navigation'
 import { useCallback, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import Button from '@/app/components/base/button'
 import Input from '@/app/components/base/input'
-import Toast from '@/app/components/base/toast'
+import { toast } from '@/app/components/base/ui/toast'
 import { validPassword } from '@/config'
+import { useRouter, useSearchParams } from '@/next/navigation'
 import { changeWebAppPasswordWithToken } from '@/service/common'
 import { cn } from '@/utils/classnames'
 
@@ -24,10 +24,7 @@ const ChangePasswordForm = () => {
   const [showConfirmPassword, setShowConfirmPassword] = useState(false)
 
   const showErrorMessage = useCallback((message: string) => {
-    Toast.notify({
-      type: 'error',
-      message,
-    })
+    toast.error(message)
   }, [])
 
   const getSignInUrl = () => {
@@ -91,10 +88,10 @@ const ChangePasswordForm = () => {
       {!showSuccess && (
         <div className="flex flex-col md:w-[400px]">
           <div className="mx-auto w-full">
-            <h2 className="title-4xl-semi-bold text-text-primary">
+            <h2 className="text-text-primary title-4xl-semi-bold">
               {t('changePassword', { ns: 'login' })}
             </h2>
-            <p className="body-md-regular mt-2 text-text-secondary">
+            <p className="mt-2 text-text-secondary body-md-regular">
               {t('changePasswordTip', { ns: 'login' })}
             </p>
           </div>
@@ -103,7 +100,7 @@ const ChangePasswordForm = () => {
             <div className="bg-white">
               {/* Password */}
               <div className="mb-5">
-                <label htmlFor="password" className="system-md-semibold my-2 text-text-secondary">
+                <label htmlFor="password" className="my-2 text-text-secondary system-md-semibold">
                   {t('account.newPassword', { ns: 'common' })}
                 </label>
                 <div className="relative mt-1">
@@ -125,11 +122,11 @@ const ChangePasswordForm = () => {
                     </Button>
                   </div>
                 </div>
-                <div className="body-xs-regular mt-1 text-text-secondary">{t('error.passwordInvalid', { ns: 'login' })}</div>
+                <div className="mt-1 text-text-secondary body-xs-regular">{t('error.passwordInvalid', { ns: 'login' })}</div>
               </div>
               {/* Confirm Password */}
               <div className="mb-5">
-                <label htmlFor="confirmPassword" className="system-md-semibold my-2 text-text-secondary">
+                <label htmlFor="confirmPassword" className="my-2 text-text-secondary system-md-semibold">
                   {t('account.confirmPassword', { ns: 'common' })}
                 </label>
                 <div className="relative mt-1">
@@ -170,7 +167,7 @@ const ChangePasswordForm = () => {
             <div className="mb-3 flex h-14 w-14 items-center justify-center rounded-2xl border border-components-panel-border-subtle font-bold shadow-lg">
               <RiCheckboxCircleFill className="h-6 w-6 text-text-success" />
             </div>
-            <h2 className="title-4xl-semi-bold text-text-primary">
+            <h2 className="text-text-primary title-4xl-semi-bold">
               {t('passwordChangedTip', { ns: 'login' })}
             </h2>
           </div>

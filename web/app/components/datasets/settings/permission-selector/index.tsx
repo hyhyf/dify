@@ -4,7 +4,7 @@ import { useDebounceFn } from 'ahooks'
 import * as React from 'react'
 import { useCallback, useMemo, useState } from 'react'
 import { useTranslation } from 'react-i18next'
-import Avatar from '@/app/components/base/avatar'
+import { Avatar } from '@/app/components/base/avatar'
 import Input from '@/app/components/base/input'
 import {
   PortalToFollowElem,
@@ -106,9 +106,9 @@ const PermissionSelector = ({
               isOnlyMe && (
                 <>
                   <div className="flex size-6 shrink-0 items-center justify-center">
-                    <Avatar avatar={userProfile.avatar_url} name={userProfile.name} size={20} />
+                    <Avatar avatar={userProfile.avatar_url} name={userProfile.name} size="xs" />
                   </div>
-                  <div className="system-sm-regular grow p-1 text-components-input-text-filled">
+                  <div className="grow p-1 text-components-input-text-filled system-sm-regular">
                     {t('form.permissionsOnlyMe', { ns: 'datasetSettings' })}
                   </div>
                 </>
@@ -120,7 +120,7 @@ const PermissionSelector = ({
                   <div className="flex size-6 shrink-0 items-center justify-center">
                     <RiGroup2Line className="size-4 text-text-secondary" />
                   </div>
-                  <div className="system-sm-regular grow p-1 text-components-input-text-filled">
+                  <div className="grow p-1 text-components-input-text-filled system-sm-regular">
                     {t('form.permissionsAllMember', { ns: 'datasetSettings' })}
                   </div>
                 </>
@@ -135,7 +135,7 @@ const PermissionSelector = ({
                         <Avatar
                           avatar={selectedMembers[0].avatar_url}
                           name={selectedMembers[0].name}
-                          size={20}
+                          size="xs"
                         />
                       )
                     }
@@ -146,13 +146,13 @@ const PermissionSelector = ({
                             avatar={selectedMembers[0].avatar_url}
                             name={selectedMembers[0].name}
                             className="absolute left-0 top-0 z-0"
-                            size={16}
+                            size="xxs"
                           />
                           <Avatar
                             avatar={selectedMembers[1].avatar_url}
                             name={selectedMembers[1].name}
                             className="absolute bottom-0 right-0 z-10"
-                            size={16}
+                            size="xxs"
                           />
                         </>
                       )
@@ -160,7 +160,7 @@ const PermissionSelector = ({
                   </div>
                   <div
                     title={selectedMemberNames}
-                    className="system-sm-regular grow truncate p-1 text-components-input-text-filled"
+                    className="grow truncate p-1 text-components-input-text-filled system-sm-regular"
                   >
                     {selectedMemberNames}
                   </div>
@@ -182,7 +182,7 @@ const PermissionSelector = ({
               {/* Only me */}
               <Item
                 leftIcon={
-                  <Avatar avatar={userProfile.avatar_url} name={userProfile.name} className="shrink-0" size={24} />
+                  <Avatar avatar={userProfile.avatar_url} name={userProfile.name} className="shrink-0" size="sm" />
                 }
                 text={t('form.permissionsOnlyMe', { ns: 'datasetSettings' })}
                 onClick={onSelectOnlyMe}
@@ -226,7 +226,7 @@ const PermissionSelector = ({
                   {showMe && (
                     <MemberItem
                       leftIcon={
-                        <Avatar avatar={userProfile.avatar_url} name={userProfile.name} className="shrink-0" size={24} />
+                        <Avatar avatar={userProfile.avatar_url} name={userProfile.name} className="shrink-0" size="sm" />
                       }
                       name={userProfile.name}
                       email={userProfile.email}
@@ -237,7 +237,7 @@ const PermissionSelector = ({
                   {filteredMemberList.map(member => (
                     <MemberItem
                       leftIcon={
-                        <Avatar avatar={member.avatar_url} name={member.name} className="shrink-0" size={24} />
+                        <Avatar avatar={member.avatar_url} name={member.name} className="shrink-0" size="sm" />
                       }
                       name={member.name}
                       email={member.email}
@@ -247,7 +247,7 @@ const PermissionSelector = ({
                   ))}
                   {
                     !showMe && filteredMemberList.length === 0 && (
-                      <div className="system-xs-regular flex items-center justify-center whitespace-pre-wrap px-1 py-6 text-center text-text-tertiary">
+                      <div className="flex items-center justify-center whitespace-pre-wrap px-1 py-6 text-center text-text-tertiary system-xs-regular">
                         {t('form.onSearchResults', { ns: 'datasetSettings' })}
                       </div>
                     )
