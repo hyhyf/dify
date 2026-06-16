@@ -66,6 +66,18 @@ def instrument_exception_logging() -> None:
     logging.getLogger().addHandler(exception_handler)
 
 
+def _trace_id_from_sw8(sw8 :str) -> str:
+    if not sw8:
+        return ""
+    parts = sw8.split("-")
+    tid = parts[1] + '=' * (-len(parts[1]) % 4)
+    try:
+        import base64
+        return base64.urlsafe_b64decode(tid).decode()
+    except Exception:
+        return ""
+
+
 def init_flask_instrumentor(app: DifyApp) -> None:
     meter = get_meter("http_metrics", version=dify_config.project.version)
     _http_response_counter = meter.create_counter(
@@ -73,6 +85,17 @@ def init_flask_instrumentor(app: DifyApp) -> None:
         description="Total number of HTTP responses by status code, method and target",
         unit="{response}",
     )
+
+    def request_hook(span: Span, environ) -> None:
+        if span and span.is_recording():
+            try:
+                sw8 = environ.get("HTTP_sw8") or environ.get("HTTP_SW8")
+                if sw8:
+                    trace_id = _trace_id_from_sw8(sw8)
+                    if trace_id:
+                        span.set_attribute("skywalking_trace_id", trace_id)
+            except Exception:
+                logger.exception("Error setting request header attributes")
 
     def response_hook(span: Span, status: str, response_headers: list) -> None:
         if span and span.is_recording():
@@ -100,7 +123,7 @@ def init_flask_instrumentor(app: DifyApp) -> None:
     instrumentor = FlaskInstrumentor()
     if dify_config.DEBUG:
         logger.info("Initializing Flask instrumentor")
-    instrumentor.instrument_app(app, response_hook=response_hook)
+    instrumentor.instrument_app(app, request_hook=request_hook, response_hook=response_hook)
 
 
 def init_sqlalchemy_instrumentor(app: DifyApp) -> None:
