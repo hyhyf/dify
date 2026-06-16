@@ -103,7 +103,7 @@ class OpsTraceProviderConfigMap(collections.UserDict[str, dict[str, Any]]):
                 return {
                     "config_class": PhoenixConfig,
                     "secret_keys": ["api_key"],
-                    "other_keys": ["project", "endpoint"],
+                    "other_keys": ["project", "endpoint", "instance_id"],
                     "trace_instance": ArizePhoenixDataTrace,
                 }
             case TracingProviderEnum.ALIYUN:
