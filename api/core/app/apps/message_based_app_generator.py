@@ -180,6 +180,8 @@ class MessageBasedAppGenerator(BaseAppGenerator):
                     from_source=from_source,
                     from_end_user_id=end_user_id,
                     from_account_id=account_id,
+                    created_at=naive_utc_now(),
+                    updated_at=naive_utc_now(),
                 )
 
                 db.session.add(conversation)
@@ -213,6 +215,8 @@ class MessageBasedAppGenerator(BaseAppGenerator):
                 from_end_user_id=end_user_id,
                 from_account_id=account_id,
                 app_mode=app_config.app_mode,
+                created_at=naive_utc_now(),
+                updated_at=naive_utc_now(),
             )
 
             db.session.add(message)
