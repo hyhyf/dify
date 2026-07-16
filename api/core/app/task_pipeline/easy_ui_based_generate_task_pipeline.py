@@ -282,6 +282,16 @@ class EasyUIBasedGenerateTaskPipeline(BasedGenerateTaskPipeline):
                 with Session(db.engine) as session:
                     err = self.handle_error(event=event, session=session, message_id=self._message_id)
                     session.commit()
+
+                if trace_manager:
+                    trace_manager.add_trace_task(
+                        TraceTask(
+                            TraceTaskName.MESSAGE_TRACE,
+                            conversation_id=self._conversation_id,
+                            message_id=self._message_id,
+                        )
+                    )
+
                 yield self.error_to_stream_response(err)
                 break
             elif isinstance(event, QueueStopEvent | QueueMessageEndEvent):
